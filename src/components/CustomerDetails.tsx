@@ -26,7 +26,7 @@ export function CustomerDetails() {
   const [showSalesHistory, setShowSalesHistory] = useState(true);
   const [showCustomerInfo, setShowCustomerInfo] = useState(true);
   const [showHeaderInfo, setShowHeaderInfo] = useState(true);
-  const { hidden: headerHidden } = useAutoHideHeader();
+  const { headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader();
   const [salesFilter, setSalesFilter] = useState<"all" | "due" | "paid">("all");
   const queryClient = useQueryClient();
 
@@ -157,7 +157,7 @@ export function CustomerDetails() {
   return (
     <div className="space-y-3 lg:space-y-5 pb-20 overflow-x-hidden w-full max-w-full">
       {/* Header */}
-      <div className={`sticky top-0 z-10 bg-background/95 backdrop-blur-sm pb-3 border-b border-border transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0' : 'translate-y-0'}`}>
+      <div ref={headerRef} style={{ marginBottom: headerHidden ? `-${headerHeight}px` : 0, transition: 'margin-bottom 300ms ease' }} className={`sticky top-0 z-10 bg-background/95 backdrop-blur-sm pb-3 border-b border-border transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0 lg:!mb-0' : 'translate-y-0'}`}>
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 min-w-0">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">

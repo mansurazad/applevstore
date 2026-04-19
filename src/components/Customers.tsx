@@ -14,8 +14,11 @@ import { Search, Users, Wallet, AlertTriangle, Eye, Pencil, Trash2, Plus, Chevro
 import { DueCollection } from "./DueCollection";
 import { CustomerPDFReport } from "./CustomerPDFReport";
 import { CloudinaryUpload } from "./CloudinaryUpload";
+import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { AutoHideSticky } from "@/components/AutoHideSticky";
 
 export function Customers() {
+  const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -178,8 +181,8 @@ export function Customers() {
   }, [customers, searchTerm, filterDue, customerDueMap, sortBy]);
 
   return (
-    <div className="flex flex-col h-screen animate-fade-in">
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-4 space-y-4">
+    <div ref={containerRef} className="flex flex-col h-screen overflow-y-auto animate-fade-in">
+      <AutoHideSticky hidden={hidden} headerHeight={headerHeight} headerRef={headerRef} className="px-1 pb-3 pt-1 space-y-3">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">👥 কাস্টমার ম্যানেজমেন্ট</h1>
@@ -297,7 +300,7 @@ export function Customers() {
             </div>
           )}
         </div>
-      </div>
+      </AutoHideSticky>
 
       {/* Customer Detail Dialog */}
       <Dialog open={!!selectedCustomer} onOpenChange={(open) => { if (!open) setSelectedCustomer(null); }}>
@@ -376,7 +379,7 @@ export function Customers() {
       </Dialog>
 
       {/* Customer List */}
-      <div className="flex-1 overflow-y-auto pt-4">
+      <div className="flex-1 pt-4 px-1">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
           {filteredCustomers.map((customer) => {
             const due = customerDueMap[customer.id]?.totalDue || 0;
