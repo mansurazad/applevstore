@@ -31,7 +31,7 @@ export function Products() {
   const [showOutOfStock, setShowOutOfStock] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [showHeader, setShowHeader] = useState(true);
-  const { containerRef, hidden: headerHidden } = useAutoHideHeader<HTMLDivElement>();
+  const { containerRef, headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const [sortBy, setSortBy] = useState<"name" | "price_high" | "price_low" | "newest" | "oldest">("name");
   const [formData, setFormData] = useState({
     name: "",
@@ -493,7 +493,7 @@ export function Products() {
   return (
     <div className="flex flex-col h-screen animate-fade-in overflow-x-hidden w-full max-w-full">
       {/* Fixed Header */}
-      <div className={`sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-3 lg:pb-4 space-y-3 lg:space-y-4 transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0' : 'translate-y-0'}`}>
+      <div ref={headerRef} style={{ marginBottom: headerHidden ? `-${headerHeight}px` : 0, transition: 'margin-bottom 300ms ease' }} className={`sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-3 lg:pb-4 space-y-3 lg:space-y-4 transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0 lg:!mb-0' : 'translate-y-0'}`}>
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 lg:gap-4 min-w-0">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">

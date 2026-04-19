@@ -19,7 +19,7 @@ interface DashboardProps {
 export function Dashboard({ onNavigateToPOS, onNavigateToProducts }: DashboardProps = {}) {
   const { settings, logoSrc } = useShopSettings();
   const [showHeaderInfo, setShowHeaderInfo] = useState(true);
-  const { containerRef, hidden: headerHidden } = useAutoHideHeader<HTMLDivElement>();
+  const { containerRef, headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
 
   const { data: products, isLoading: productsLoading } = useQuery({
     queryKey: ["products"],
@@ -254,7 +254,7 @@ export function Dashboard({ onNavigateToPOS, onNavigateToProducts }: DashboardPr
 
   return (
     <div className="flex flex-col h-screen animate-fade-in overflow-x-hidden w-full max-w-full">
-      <div className={`sticky top-0 z-10 bg-background/80 backdrop-blur-xl border-b border-border/50 pb-3 lg:pb-4 transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0' : 'translate-y-0'}`}>
+      <div ref={headerRef} style={{ marginBottom: headerHidden ? `-${headerHeight}px` : 0, transition: 'margin-bottom 300ms ease' }} className={`sticky top-0 z-10 bg-background/80 backdrop-blur-xl border-b border-border/50 pb-3 lg:pb-4 transition-transform duration-300 ${headerHidden ? '-translate-y-full lg:translate-y-0 lg:!mb-0' : 'translate-y-0'}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
