@@ -31,7 +31,7 @@ export function POS() {
   const [instantCustomerPhone, setInstantCustomerPhone] = useState("");
   const [paidAmount, setPaidAmount] = useState(0);
   const [saleImageUrl, setSaleImageUrl] = useState("");
-  const { containerRef, hidden: headerHidden } = useAutoHideHeader<HTMLDivElement>();
+  const { containerRef, headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
 
   const queryClient = useQueryClient();
 
@@ -282,6 +282,8 @@ export function POS() {
         onShowOutOfStockChange={setShowOutOfStock}
         onOpenScanner={() => setShowScanner(true)}
         hidden={headerHidden}
+        headerRef={headerRef}
+        headerHeight={headerHeight}
       />
 
       <div ref={containerRef} className="flex-1 flex lg:flex-row flex-col overflow-y-auto lg:overflow-hidden">
