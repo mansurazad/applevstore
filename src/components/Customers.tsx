@@ -300,7 +300,7 @@ export function Customers() {
             </div>
           )}
         </div>
-      </div>
+      </AutoHideSticky>
 
       {/* Customer Detail Dialog */}
       <Dialog open={!!selectedCustomer} onOpenChange={(open) => { if (!open) setSelectedCustomer(null); }}>
