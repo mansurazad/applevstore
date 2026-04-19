@@ -394,6 +394,7 @@ export function Investments() {
             </DialogContent>
           </Dialog>
         </div>
+        </div>
       </AutoHideSticky>
 
       <div className="flex-1 px-1 pb-6 space-y-4">
