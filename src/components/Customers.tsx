@@ -379,7 +379,7 @@ export function Customers() {
       </Dialog>
 
       {/* Customer List */}
-      <div className="flex-1 overflow-y-auto pt-4">
+      <div className="flex-1 pt-4 px-1">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
           {filteredCustomers.map((customer) => {
             const due = customerDueMap[customer.id]?.totalDue || 0;
