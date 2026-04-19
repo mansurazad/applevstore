@@ -2,13 +2,38 @@ import { useEffect, useRef, useState } from "react";
 
 /**
  * Auto-hide a sticky header on scroll-down, reveal on scroll-up.
- * Returns a ref to attach to the scrollable container, plus `hidden` boolean.
- * If no container is provided/attached, falls back to window scroll.
+ * - `containerRef`: attach to the scrollable container (falls back to window).
+ * - `headerRef`: attach to the sticky header element. We measure its height
+ *   so callers can collapse the reserved space when hidden (no blank gap).
+ * - `hidden`: true when the header should be translated off-screen.
+ * - `headerHeight`: live measured height of the header (px). Use this to
+ *   set a top padding/spacer that animates to 0 when `hidden` is true.
  */
-export function useAutoHideHeader<T extends HTMLElement = HTMLDivElement>(threshold = 10) {
-  const containerRef = useRef<T | null>(null);
+export function useAutoHideHeader<
+  C extends HTMLElement = HTMLDivElement,
+  H extends HTMLElement = HTMLDivElement
+>(threshold = 8) {
+  const containerRef = useRef<C | null>(null);
+  const headerRef = useRef<H | null>(null);
   const lastScrollY = useRef(0);
   const [hidden, setHidden] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  // Track header height (responsive, content changes, etc.)
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    const update = () => setHeaderHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     const target: HTMLElement | Window = containerRef.current ?? window;
@@ -22,7 +47,7 @@ export function useAutoHideHeader<T extends HTMLElement = HTMLDivElement>(thresh
       const currentY = getY();
       const diff = currentY - lastScrollY.current;
 
-      if (currentY < 40) {
+      if (currentY < 24) {
         setHidden(false);
       } else if (diff > threshold) {
         setHidden(true);
@@ -37,5 +62,5 @@ export function useAutoHideHeader<T extends HTMLElement = HTMLDivElement>(thresh
     return () => target.removeEventListener("scroll", onScroll);
   }, [threshold]);
 
-  return { containerRef, hidden };
+  return { containerRef, headerRef, hidden, headerHeight };
 }
