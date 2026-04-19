@@ -14,8 +14,11 @@ import { format } from "date-fns";
 import { bn } from "date-fns/locale";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import * as XLSX from "xlsx";
+import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { AutoHideSticky } from "@/components/AutoHideSticky";
 
 export function Investments() {
+  const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const queryClient = useQueryClient();
   const { settings } = useShopSettings();
   const [showAddSector, setShowAddSector] = useState(false);
@@ -353,9 +356,9 @@ export function Investments() {
   );
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+    <div ref={containerRef} className="flex flex-col h-screen overflow-y-auto animate-fade-in">
+      <AutoHideSticky hidden={hidden} headerHeight={headerHeight} headerRef={headerRef} className="px-1 pb-3 pt-1">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">💼 ইনভেস্টমেন্ট ট্র্যাকার</h1>
           <p className="text-sm text-muted-foreground">খাতওয়ারি বিনিয়োগ, আয় ও লাভ-ক্ষতি হিসাব</p>
