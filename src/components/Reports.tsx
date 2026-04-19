@@ -7,8 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { useReactToPrint } from "react-to-print";
 import * as XLSX from "xlsx";
+import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { AutoHideSticky } from "@/components/AutoHideSticky";
 
 export function Reports() {
+  const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterCustomer, setFilterCustomer] = useState("all");
@@ -143,9 +146,9 @@ export function Reports() {
   };
 
   return (
-    <div className="flex flex-col h-screen animate-fade-in">
-      {/* Fixed Header and Filters */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-4 space-y-4">
+    <div ref={containerRef} className="flex flex-col h-screen overflow-y-auto animate-fade-in">
+      {/* Auto-hide Header */}
+      <AutoHideSticky hidden={hidden} headerHeight={headerHeight} headerRef={headerRef} className="px-1 pb-3 pt-1 space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground">Reports & Analytics</h1>
