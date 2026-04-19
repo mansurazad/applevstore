@@ -9,8 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { CloudinaryUpload } from "./CloudinaryUpload";
+import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { AutoHideSticky } from "@/components/AutoHideSticky";
 
 export function Suppliers() {
+  const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isPurchaseDialogOpen, setIsPurchaseDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<any>(null);
@@ -182,9 +185,9 @@ export function Suppliers() {
   };
 
   return (
-    <div className="flex flex-col h-screen animate-fade-in">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-4">
+    <div ref={containerRef} className="flex flex-col h-screen overflow-y-auto animate-fade-in">
+      {/* Auto-hide Header */}
+      <AutoHideSticky hidden={hidden} headerHeight={headerHeight} headerRef={headerRef} className="px-1 pb-3 pt-1">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground">Suppliers & Purchases</h1>
@@ -270,10 +273,10 @@ export function Suppliers() {
           </DialogContent>
         </Dialog>
         </div>
-      </div>
+      </AutoHideSticky>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 px-1">
         <Tabs defaultValue="suppliers" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="suppliers">Suppliers ({suppliers?.length || 0})</TabsTrigger>

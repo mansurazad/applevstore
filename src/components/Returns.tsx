@@ -12,8 +12,11 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { bn } from "date-fns/locale";
 import { RotateCcw, Search, Package, Calendar, User, CheckCircle, XCircle, Clock } from "lucide-react";
+import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { AutoHideSticky } from "@/components/AutoHideSticky";
 
 export function Returns() {
+  const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [searchSaleId, setSearchSaleId] = useState("");
   const [selectedSale, setSelectedSale] = useState<any>(null);
@@ -248,9 +251,9 @@ export function Returns() {
   }
 
   return (
-    <div className="flex flex-col h-screen animate-fade-in">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-border pb-4 space-y-4">
+    <div ref={containerRef} className="flex flex-col h-screen overflow-y-auto animate-fade-in">
+      {/* Auto-hide Header */}
+      <AutoHideSticky hidden={hidden} headerHeight={headerHeight} headerRef={headerRef} className="px-1 pb-3 pt-1 space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-2">
@@ -470,10 +473,10 @@ export function Returns() {
             </Select>
           </div>
         </Card>
-      </div>
+      </AutoHideSticky>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto pb-6 space-y-4">
+      <div className="flex-1 pb-6 space-y-4 px-1">
         {/* Returns List */}
         {filteredReturns.length > 0 ? (
           <div className="grid gap-4">
