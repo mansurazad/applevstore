@@ -394,8 +394,9 @@ export function Investments() {
             </DialogContent>
           </Dialog>
         </div>
-      </div>
+      </AutoHideSticky>
 
+      <div className="flex-1 px-1 pb-6 space-y-4">
       {/* Edit Dialogs */}
       <Dialog open={showEditSector} onOpenChange={(open) => { setShowEditSector(open); if (!open) { setSectorName(""); setSectorDesc(""); } }}>
         <DialogContent>
@@ -596,6 +597,7 @@ export function Investments() {
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   );
 }
