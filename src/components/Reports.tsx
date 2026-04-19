@@ -236,10 +236,10 @@ export function Reports() {
           </>
           )}
         </Card>
-      </div>
+      </AutoHideSticky>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto pb-6 space-y-4 md:space-y-6">
+      <div className="flex-1 pb-6 space-y-4 md:space-y-6 px-1">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
           <Card className="p-4 md:p-6">
             <h3 className="text-xs md:text-sm font-medium text-muted-foreground mb-2">Total Revenue</h3>
