@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,8 @@ import { ActivityLogger } from "@/hooks/useActivityLog";
 import * as XLSX from "xlsx";
 import { CloudinaryUpload } from "./CloudinaryUpload";
 import { isCloudinaryUrl } from "@/lib/cloudinary";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 export function Products() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
@@ -59,31 +61,26 @@ export function Products() {
 
   const queryClient = useQueryClient();
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*, categories(name)")
-        .order("name");
-      if (error) throw error;
-      return data;
+  // Offline-first reads: live-bound to local DB; sync engine refreshes in background.
+  const rawProducts = useLiveQuery(() => localDb.products.list(), []);
+  const categories = useLiveQuery(
+    async () => {
+      const all = await localDb.categories.list();
+      return all.sort((a: any, b: any) => (a.name ?? "").localeCompare(b.name ?? ""));
     },
-  });
-
-  const { data: categories } = useQuery({
-    queryKey: ["categories"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("categories").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+    []
+  );
+  const products = useMemo(() => {
+    if (!rawProducts) return undefined;
+    const catMap = new Map((categories ?? []).map((c: any) => [c.id, c]));
+    return [...rawProducts]
+      .map((p: any) => ({ ...p, categories: p.category_id ? catMap.get(p.category_id) : null }))
+      .sort((a: any, b: any) => (a.name ?? "").localeCompare(b.name ?? ""));
+  }, [rawProducts, categories]);
 
   const addMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { data: inserted, error } = await supabase.from("products").insert([data]).select().single();
-      if (error) throw error;
+      const inserted = await localDb.products.create<any>(data);
       return { ...inserted, name: data.name };
     },
     onSuccess: (result) => {
@@ -100,8 +97,7 @@ export function Products() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const { error } = await supabase.from("products").update(data).eq("id", id);
-      if (error) throw error;
+      await localDb.products.update<any>(id, data);
       return { id, name: data.name };
     },
     onSuccess: (result) => {
@@ -118,8 +114,7 @@ export function Products() {
 
   const deleteMutation = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      const { error } = await supabase.from("products").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.products.remove(id);
       return name;
     },
     onSuccess: (name) => {
@@ -186,28 +181,19 @@ export function Products() {
       return;
     }
 
-    // Check for duplicate IMEI (both add and edit)
+    // Duplicate IMEI check — runs against the local DB (offline-safe)
     if (formData.imei) {
-      let query = supabase
-        .from("products")
-        .select("id, name, stock_quantity")
-        .eq("imei", formData.imei)
-        .gt("stock_quantity", 0);
-
-      // When editing, exclude the current product from the check
-      if (editingProduct) {
-        query = query.neq("id", editingProduct.id);
-      }
-
-      const { data: existingProducts, error } = await query;
-
-      if (error) {
-        toast.error("IMEI চেক করতে ব্যর্থ");
-        return;
-      }
-
-      if (existingProducts && existingProducts.length > 0) {
-        toast.error(`এই IMEI (${formData.imei}) দিয়ে "${existingProducts[0].name}" ইতিমধ্যে স্টকে আছে। আগে বিক্রি করুন, তারপর আবার এন্ট্রি করতে পারবেন।`);
+      const all = await localDb.products.list();
+      const conflict = (all as any[]).find(
+        (p) =>
+          p.imei === formData.imei &&
+          (p.stock_quantity ?? 0) > 0 &&
+          (!editingProduct || p.id !== editingProduct.id)
+      );
+      if (conflict) {
+        toast.error(
+          `এই IMEI (${formData.imei}) দিয়ে "${conflict.name}" ইতিমধ্যে স্টকে আছে। আগে বিক্রি করুন, তারপর আবার এন্ট্রি করতে পারবেন।`
+        );
         return;
       }
     }
