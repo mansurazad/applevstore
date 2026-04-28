@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SyncStatusBadge } from "@/components/SyncStatusBadge";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { MobileDashboardWidget } from "./MobileDashboardWidget";
 import { Wallet, TrendingUp, AlertCircle, PiggyBank, Users, CreditCard, ShoppingCart, Award, BarChart3, ChevronUp, ChevronDown } from "lucide-react";
