@@ -1,5 +1,4 @@
 import { useState, useMemo, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +14,8 @@ import { getOptimizedUrl, isCloudinaryUrl } from "@/lib/cloudinary";
 import { useReactToPrint } from "react-to-print";
 import * as XLSX from "xlsx";
 import { DueCollection } from "./DueCollection";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 interface SaleDetail {
   id: string;
@@ -64,47 +65,67 @@ export function Sales() {
   const itemsPerPage = 10;
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Fetch sales data
-  const { data: sales = [], isLoading } = useQuery({
-    queryKey: ["sales"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sales")
-        .select(`
-          *,
-          customers (name, phone, email),
-          sale_items (
-            quantity,
-            unit_price,
-            total_price,
-            condition,
-            products (name, sku, imei, brand, model, image_url)
-          )
-        `)
-        .order("created_at", { ascending: false });
+  // Offline-first reads from local DB (auto-synced in background).
+  const rawSales = useLiveQuery(() => localDb.sales.list(), []);
+  const rawSaleItems = useLiveQuery(() => localDb.saleItems.list(), []);
+  const rawCustomers = useLiveQuery(() => localDb.customers.list(), []);
+  const rawProducts = useLiveQuery(() => localDb.products.list(), []);
 
-      if (error) throw error;
-      
-      // Ensure sale_items is always an array
-      return (data || []).map(sale => ({
-        ...sale,
-        sale_items: sale.sale_items || []
-      })) as SaleDetail[];
-    },
-  });
+  const isLoading =
+    rawSales === undefined ||
+    rawSaleItems === undefined ||
+    rawCustomers === undefined ||
+    rawProducts === undefined;
 
-  // Fetch customers for filter
-  const { data: customers = [] } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("customers")
-        .select("id, name")
-        .order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const customers = useMemo(() => {
+    return [...(rawCustomers ?? [])].sort((a: any, b: any) =>
+      (a.name ?? "").localeCompare(b.name ?? "")
+    );
+  }, [rawCustomers]);
+
+  const sales: SaleDetail[] = useMemo(() => {
+    if (isLoading) return [];
+    const customerMap = new Map((rawCustomers ?? []).map((c: any) => [c.id, c]));
+    const productMap = new Map((rawProducts ?? []).map((p: any) => [p.id, p]));
+    const itemsBySale = new Map<string, any[]>();
+    for (const it of rawSaleItems ?? []) {
+      const arr = itemsBySale.get((it as any).sale_id) ?? [];
+      arr.push(it);
+      itemsBySale.set((it as any).sale_id, arr);
+    }
+    return [...(rawSales ?? [])]
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      .map((s: any) => {
+        const cust = s.customer_id ? customerMap.get(s.customer_id) : null;
+        const items = (itemsBySale.get(s.id) ?? []).map((it: any) => {
+          const p: any = productMap.get(it.product_id) ?? {};
+          return {
+            quantity: it.quantity,
+            unit_price: it.unit_price,
+            total_price: it.total_price,
+            condition: it.condition ?? p.condition ?? "new",
+            products: {
+              name: p.name ?? "N/A",
+              sku: p.sku ?? null,
+              imei: p.imei ?? null,
+              brand: p.brand ?? null,
+              model: p.model ?? null,
+              image_url: p.image_url ?? null,
+            },
+          };
+        });
+        return {
+          ...s,
+          customers: cust
+            ? { name: (cust as any).name, phone: (cust as any).phone ?? null, email: (cust as any).email ?? null }
+            : null,
+          sale_items: items,
+        } as SaleDetail;
+      });
+  }, [isLoading, rawSales, rawSaleItems, rawCustomers, rawProducts]);
 
   // Filter and search logic
   const filteredSales = useMemo(() => {
