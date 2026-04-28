@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SyncStatusBadge } from "@/components/SyncStatusBadge";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { MobileDashboardWidget } from "./MobileDashboardWidget";
 import { Wallet, TrendingUp, AlertCircle, PiggyBank, Users, CreditCard, ShoppingCart, Award, BarChart3, ChevronUp, ChevronDown } from "lucide-react";
@@ -259,6 +260,7 @@ export function Dashboard({ onNavigateToPOS, onNavigateToProducts }: DashboardPr
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground truncate">ড্যাশবোর্ড</h1>
+              <SyncStatusBadge className="hidden sm:inline-flex" />
               <button
                 type="button"
                 className="lg:hidden h-7 w-7 inline-flex items-center justify-center rounded-md hover:bg-muted shrink-0"
