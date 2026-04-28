@@ -80,7 +80,7 @@ export function Products() {
 
   const addMutation = useMutation({
     mutationFn: async (data: any) => {
-      const inserted = await localDb.products.create<any>(data);
+      const inserted = (await localDb.products.create(data)) as any;
       return { ...inserted, name: data.name };
     },
     onSuccess: (result) => {
@@ -97,7 +97,7 @@ export function Products() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      await localDb.products.update<any>(id, data);
+      await localDb.products.update(id, data);
       return { id, name: data.name };
     },
     onSuccess: (result) => {
