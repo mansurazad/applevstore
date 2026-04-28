@@ -204,3 +204,19 @@ export type SyncError = {
   created_at: string;    // ISO timestamp
   resolved?: 0 | 1;      // 1 once successfully retried/cleared
 };
+
+/**
+ * Represents a sync conflict where both the local DB and the server have
+ * diverging changes for the same row. Stored locally until the user picks
+ * a winning side via the conflict resolution UI.
+ */
+export type SyncConflict = {
+  id: string;                // primary key (uuid)
+  table: string;             // affected local table
+  row_id: string;            // conflicting row id
+  local: any;                // local version (with _dirty=1)
+  remote: any;               // server version
+  detected_at: string;       // ISO timestamp
+  resolved?: 0 | 1;          // 1 once user picked a side
+  resolution?: "local" | "remote" | null;
+};

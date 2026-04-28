@@ -15,6 +15,7 @@ import type {
   LocalActivityLog,
   SyncState,
   SyncError,
+  SyncConflict,
 } from "./schema";
 
 /**
@@ -40,6 +41,7 @@ export class AppleStoreLocalDB extends Dexie {
   activity_logs!: Table<LocalActivityLog, string>;
   sync_state!: Table<SyncState, string>;
   sync_errors!: Table<SyncError, string>;
+  sync_conflicts!: Table<SyncConflict, string>;
 
   constructor(dbName: string) {
     super(dbName);
@@ -66,6 +68,10 @@ export class AppleStoreLocalDB extends Dexie {
 
     this.version(2).stores({
       sync_errors: "id, table, row_id, operation, resolved, created_at",
+    });
+
+    this.version(3).stores({
+      sync_conflicts: "id, table, row_id, resolved, detected_at",
     });
   }
 }
