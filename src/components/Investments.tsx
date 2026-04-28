@@ -16,6 +16,8 @@ import { useShopSettings } from "@/hooks/useShopSettings";
 import * as XLSX from "xlsx";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { AutoHideSticky } from "@/components/AutoHideSticky";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 export function Investments() {
   const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
@@ -52,38 +54,66 @@ export function Investments() {
   const [editEntryId, setEditEntryId] = useState("");
   const [editIncomeId, setEditIncomeId] = useState("");
 
-  const { data: sectors } = useQuery({
-    queryKey: ["investment-sectors"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("investment_sectors").select("*").order("created_at");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawSectors = useLiveQuery(() => localDb.investmentSectors.list(), []);
+  const rawEntries = useLiveQuery(() => localDb.investmentEntries.list(), []);
+  const rawIncomes = useLiveQuery(() => localDb.investmentIncomes.list(), []);
 
-  const { data: entries } = useQuery({
-    queryKey: ["investment-entries"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("investment_entries").select("*, investment_sectors(name)").order("entry_date", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
+  const sectors = useMemo(
+    () =>
+      rawSectors
+        ? [...rawSectors].sort(
+            (a: any, b: any) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          )
+        : undefined,
+    [rawSectors]
+  );
 
-  const { data: incomes } = useQuery({
-    queryKey: ["investment-incomes"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("investment_incomes").select("*, investment_sectors(name)").order("income_date", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
+  const sectorMap = useMemo(
+    () => new Map((rawSectors ?? []).map((s: any) => [s.id, s])),
+    [rawSectors]
+  );
+
+  const entries = useMemo(
+    () =>
+      rawEntries
+        ? [...rawEntries]
+            .sort(
+              (a: any, b: any) =>
+                new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
+            )
+            .map((e: any) => ({
+              ...e,
+              investment_sectors: sectorMap.get(e.sector_id)
+                ? { name: (sectorMap.get(e.sector_id) as any).name }
+                : null,
+            }))
+        : undefined,
+    [rawEntries, sectorMap]
+  );
+
+  const incomes = useMemo(
+    () =>
+      rawIncomes
+        ? [...rawIncomes]
+            .sort(
+              (a: any, b: any) =>
+                new Date(b.income_date).getTime() - new Date(a.income_date).getTime()
+            )
+            .map((i: any) => ({
+              ...i,
+              investment_sectors: sectorMap.get(i.sector_id)
+                ? { name: (sectorMap.get(i.sector_id) as any).name }
+                : null,
+            }))
+        : undefined,
+    [rawIncomes, sectorMap]
+  );
 
   // SECTOR CRUD
   const addSectorMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("investment_sectors").insert({ name: sectorName, description: sectorDesc });
-      if (error) throw error;
+      await localDb.investmentSectors.create({ name: sectorName, description: sectorDesc });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-sectors"] }); toast.success("নতুন খাত যোগ হয়েছে"); setSectorName(""); setSectorDesc(""); setShowAddSector(false); },
     onError: () => toast.error("খাত যোগ করতে ব্যর্থ"),
@@ -91,8 +121,7 @@ export function Investments() {
 
   const updateSectorMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("investment_sectors").update({ name: sectorName, description: sectorDesc }).eq("id", editSectorId);
-      if (error) throw error;
+      await localDb.investmentSectors.update(editSectorId, { name: sectorName, description: sectorDesc });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-sectors"] }); toast.success("খাত আপডেট হয়েছে"); setSectorName(""); setSectorDesc(""); setEditSectorId(""); setShowEditSector(false); },
     onError: () => toast.error("খাত আপডেট করতে ব্যর্থ"),
@@ -100,8 +129,7 @@ export function Investments() {
 
   const deleteSectorMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("investment_sectors").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.investmentSectors.remove(id);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-sectors"] }); toast.success("খাত মুছে ফেলা হয়েছে"); },
     onError: () => toast.error("খাত মুছতে ব্যর্থ — প্রথমে এই খাতের সকল এন্ট্রি ও আয় মুছুন"),
@@ -111,11 +139,10 @@ export function Investments() {
   const addEntryMutation = useMutation({
     mutationFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase.from("investment_entries").insert({
+      await localDb.investmentEntries.create({
         sector_id: selectedSectorId, amount: Number(entryAmount), entry_type: entryType,
         purpose: entryPurpose, notes: entryNotes, entry_date: entryDate, created_by: user?.id,
       });
-      if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-entries"] }); toast.success("এন্ট্রি যোগ হয়েছে"); resetEntryForm(); setShowAddEntry(false); },
     onError: () => toast.error("এন্ট্রি যোগ করতে ব্যর্থ"),
@@ -123,11 +150,10 @@ export function Investments() {
 
   const updateEntryMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("investment_entries").update({
+      await localDb.investmentEntries.update(editEntryId, {
         sector_id: selectedSectorId, amount: Number(entryAmount), entry_type: entryType,
         purpose: entryPurpose, notes: entryNotes, entry_date: entryDate,
-      }).eq("id", editEntryId);
-      if (error) throw error;
+      });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-entries"] }); toast.success("এন্ট্রি আপডেট হয়েছে"); resetEntryForm(); setEditEntryId(""); setShowEditEntry(false); },
     onError: () => toast.error("এন্ট্রি আপডেট করতে ব্যর্থ"),
@@ -135,8 +161,7 @@ export function Investments() {
 
   const deleteEntryMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("investment_entries").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.investmentEntries.remove(id);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-entries"] }); toast.success("এন্ট্রি মুছে ফেলা হয়েছে"); },
   });
@@ -145,11 +170,10 @@ export function Investments() {
   const addIncomeMutation = useMutation({
     mutationFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase.from("investment_incomes").insert({
+      await localDb.investmentIncomes.create({
         sector_id: selectedSectorId, amount: Number(incomeAmount), source: incomeSource,
         purpose: incomePurpose, notes: incomeNotes, income_date: incomeDate, created_by: user?.id,
       });
-      if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-incomes"] }); toast.success("আয় যোগ হয়েছে"); resetIncomeForm(); setShowAddIncome(false); },
     onError: () => toast.error("আয় যোগ করতে ব্যর্থ"),
@@ -157,11 +181,10 @@ export function Investments() {
 
   const updateIncomeMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("investment_incomes").update({
+      await localDb.investmentIncomes.update(editIncomeId, {
         sector_id: selectedSectorId, amount: Number(incomeAmount), source: incomeSource,
         purpose: incomePurpose, notes: incomeNotes, income_date: incomeDate,
-      }).eq("id", editIncomeId);
-      if (error) throw error;
+      });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-incomes"] }); toast.success("আয় আপডেট হয়েছে"); resetIncomeForm(); setEditIncomeId(""); setShowEditIncome(false); },
     onError: () => toast.error("আয় আপডেট করতে ব্যর্থ"),
@@ -169,8 +192,7 @@ export function Investments() {
 
   const deleteIncomeMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("investment_incomes").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.investmentIncomes.remove(id);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-incomes"] }); toast.success("আয় মুছে ফেলা হয়েছে"); },
   });
