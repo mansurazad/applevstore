@@ -9,6 +9,16 @@ import {
 } from "@/lib/sync/errors";
 import { useSync } from "@/lib/sync/SyncProvider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -37,6 +47,8 @@ const opLabel: Record<string, string> = {
  */
 export function SyncErrorPanel({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
+  const [confirmRetry, setConfirmRetry] = useState(false);
+  const [confirmDismissAll, setConfirmDismissAll] = useState(false);
   const [opFilter, setOpFilter] = useState<string>("all");
   const [tableFilter, setTableFilter] = useState<string>("all");
   const errors = useLiveQuery(() => listUnresolvedErrors(), []);
@@ -60,7 +72,7 @@ export function SyncErrorPanel({ className }: { className?: string }) {
 
   if (count === 0) return null;
 
-  const handleRetry = async () => {
+  const runRetry = async () => {
     const res = await syncNow();
     if (res?.ok) {
       // Errors that no longer recur will be replaced by fresh ones, but
@@ -87,7 +99,7 @@ export function SyncErrorPanel({ className }: { className?: string }) {
     }
   };
 
-  const handleDismissAll = async () => {
+  const runDismissAll = async () => {
     await clearAllErrors();
     toast.success("সকল ত্রুটি লগ মুছে ফেলা হয়েছে");
   };
@@ -118,11 +130,11 @@ export function SyncErrorPanel({ className }: { className?: string }) {
           </DialogHeader>
 
           <div className="flex flex-wrap gap-2 mb-3">
-            <Button onClick={handleRetry} disabled={syncing} size="sm" className="gap-2">
+            <Button onClick={() => setConfirmRetry(true)} disabled={syncing} size="sm" className="gap-2">
               <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
               সব ব্যর্থ sync পুনরায় চেষ্টা
             </Button>
-            <Button onClick={handleDismissAll} variant="outline" size="sm" className="gap-2">
+            <Button onClick={() => setConfirmDismissAll(true)} variant="outline" size="sm" className="gap-2">
               <RotateCcw className="h-4 w-4" />
               সব লগ মুছুন
             </Button>
@@ -221,6 +233,68 @@ export function SyncErrorPanel({ className }: { className?: string }) {
           </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      {/* Retry-all confirmation */}
+      <AlertDialog open={confirmRetry} onOpenChange={setConfirmRetry}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              সব ব্যর্থ sync পুনরায় চেষ্টা?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              এটি এখনই সার্ভারের সাথে full sync চালাবে এবং {count} টি ব্যর্থ
+              অপারেশন আবার আপলোড/ডাউনলোড করার চেষ্টা করবে। ইন্টারনেট সংযোগ
+              দুর্বল হলে এটি কিছুটা সময় নিতে পারে।
+              <br />
+              <span className="text-xs text-muted-foreground mt-2 block">
+                আপনি কি নিশ্চিত?
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>বাতিল</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setConfirmRetry(false);
+                await runRetry();
+              }}
+              disabled={syncing}
+            >
+              ✓ হ্যাঁ, পুনরায় চেষ্টা করুন
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dismiss-all confirmation */}
+      <AlertDialog open={confirmDismissAll} onOpenChange={setConfirmDismissAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <RotateCcw className="h-5 w-5" />
+              সব ত্রুটি লগ মুছবেন?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              এটি বর্তমান {count} টি ত্রুটি লগ স্থায়ীভাবে মুছে ফেলবে। মুছে
+              ফেলার পরও মূল ডেটা সিঙ্ক ব্যর্থ থাকলে নতুন ত্রুটি লগ হবে।
+              এই কাজটি undo করা যাবে না।
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>বাতিল</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                setConfirmDismissAll(false);
+                await runDismissAll();
+              }}
+            >
+              ✓ হ্যাঁ, মুছে ফেলুন
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
