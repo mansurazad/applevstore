@@ -91,7 +91,7 @@ export function POS() {
       }
 
       // 3) Resolve relations locally for the invoice modal.
-      const customer = sale.customer_id
+      const customer: any = sale.customer_id
         ? await localDb.customers.get(sale.customer_id)
         : null;
       const productMap = new Map(
@@ -99,10 +99,29 @@ export function POS() {
       );
       const fullSale = {
         ...sale,
-        customers: customer ?? null,
+        customers: customer
+          ? {
+              name: customer.name,
+              phone: customer.phone ?? null,
+              email: customer.email ?? null,
+              address: customer.address ?? null,
+            }
+          : null,
         sale_items: insertedItems.map((it: any) => ({
           ...it,
-          products: productMap.get(it.product_id) ?? null,
+          products: (() => {
+            const p: any = productMap.get(it.product_id);
+            if (!p) return null;
+            return {
+              name: p.name,
+              sku: p.sku ?? null,
+              imei: p.imei ?? null,
+              brand: p.brand ?? null,
+              model: p.model ?? null,
+              condition: p.condition ?? "new",
+              image_url: p.image_url ?? null,
+            };
+          })(),
         })),
       };
       return fullSale;
