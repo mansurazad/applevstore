@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { InvoiceModal } from "./InvoiceModal";
 import { BarcodeScanner } from "./BarcodeScanner";
 import { ActivityLogger } from "@/hooks/useActivityLog";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 // Sub-components
 import { CartItem, Product, Customer } from "./pos/types";
@@ -35,92 +37,74 @@ export function POS() {
 
   const queryClient = useQueryClient();
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("products").select("*").order("name");
-      if (error) throw error;
-      return data as Product[];
-    },
-  });
-
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("customers").select("*").order("name");
-      if (error) throw error;
-      return data as Customer[];
-    },
-  });
+  const productsRaw = useLiveQuery(() => localDb.products.list(), []);
+  const customersRaw = useLiveQuery(() => localDb.customers.list(), []);
+  const products = productsRaw
+    ? ([...productsRaw].sort((a: any, b: any) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      ) as Product[])
+    : undefined;
+  const customers = customersRaw
+    ? ([...customersRaw].sort((a: any, b: any) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      ) as Customer[])
+    : undefined;
 
   const completeSaleMutation = useMutation({
     mutationFn: async (saleData: any) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const { data: sale, error: saleError } = await supabase
-        .from("sales")
-        .insert([{
-          user_id: user.id,
-          customer_id: saleData.customer_id,
-          total_amount: saleData.total_amount,
-          payment_method: saleData.payment_method,
-          status: "completed",
-          instant_customer_name: saleData.instant_customer_name,
-          instant_customer_phone: saleData.instant_customer_phone,
-          paid_amount: saleData.paid_amount,
-          due_amount: saleData.due_amount,
-          image_url: saleData.image_url || null,
-        }])
-        .select("*, customers(*)")
-        .single();
+      // 1) Create sale locally (offline-first). Sync engine pushes in background.
+      const sale: any = await localDb.sales.create({
+        user_id: user.id,
+        customer_id: saleData.customer_id,
+        total_amount: saleData.total_amount,
+        payment_method: saleData.payment_method,
+        status: "completed",
+        instant_customer_name: saleData.instant_customer_name,
+        instant_customer_phone: saleData.instant_customer_phone,
+        paid_amount: saleData.paid_amount,
+        due_amount: saleData.due_amount,
+        image_url: saleData.image_url || null,
+      });
 
-      if (saleError) throw saleError;
-
+      // 2) Insert sale items + decrement local stock (binary 0/1 model).
+      const insertedItems: any[] = [];
       for (const item of saleData.items) {
-        const { error: itemError } = await supabase
-          .from("sale_items")
-          .insert([{
-            sale_id: sale.id,
-            product_id: item.product_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: item.total_price,
-          }]);
+        const created = await localDb.saleItems.create({
+          sale_id: sale.id,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+        });
+        insertedItems.push(created);
 
-        if (itemError) throw itemError;
-
-        const { data: product, error: productFetchError } = await supabase
-          .from("products")
-          .select("stock_quantity")
-          .eq("id", item.product_id)
-          .single();
-
-        if (productFetchError) {
-          console.error("Failed to fetch product for stock update:", productFetchError);
-          throw new Error(`স্টক আপডেট করতে ব্যর্থ: ${item.product_id}`);
-        }
-
+        const product: any = await localDb.products.get(item.product_id);
         if (product) {
-          const newStockQuantity = Math.max(0, product.stock_quantity - item.quantity);
-          const { error: stockUpdateError } = await supabase
-            .from("products")
-            .update({ stock_quantity: newStockQuantity })
-            .eq("id", item.product_id);
-
-          if (stockUpdateError) {
-            console.error("Failed to update stock:", stockUpdateError);
-            throw new Error(`স্টক আপডেট করতে ব্যর্থ: ${item.product_id}`);
-          }
+          const newStock = Math.max(0, (product.stock_quantity ?? 0) - item.quantity);
+          await localDb.products.update(item.product_id, {
+            stock_quantity: newStock,
+          });
         }
       }
 
-      const { data: fullSale } = await supabase
-        .from("sales")
-        .select("*, customers(*), sale_items(*, products(*))")
-        .eq("id", sale.id)
-        .single();
-
+      // 3) Resolve relations locally for the invoice modal.
+      const customer = sale.customer_id
+        ? await localDb.customers.get(sale.customer_id)
+        : null;
+      const productMap = new Map(
+        (productsRaw ?? []).map((p: any) => [p.id, p])
+      );
+      const fullSale = {
+        ...sale,
+        customers: customer ?? null,
+        sale_items: insertedItems.map((it: any) => ({
+          ...it,
+          products: productMap.get(it.product_id) ?? null,
+        })),
+      };
       return fullSale;
     },
     onSuccess: (sale) => {
