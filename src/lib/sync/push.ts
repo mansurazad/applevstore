@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getActiveLocalDB } from "@/lib/localdb";
 import type { LocalTableName } from "@/lib/localdb/adapter";
 import { SYNC_TABLES, SERVER_WINS_FIELDS } from "./tables";
+import { logSyncError } from "./errors";
 
 /**
  * Strip Dexie-only metadata before sending to Supabase.
@@ -64,6 +65,13 @@ export async function pushTable(table: LocalTableName): Promise<number> {
           .eq("id", row.id);
         if (error) {
           console.warn(`[sync:push:delete] ${table}/${row.id}`, error.message);
+          await logSyncError({
+            table,
+            row_id: row.id,
+            operation: "delete",
+            message: error.message,
+            payload: row,
+          });
           continue;
         }
         await removeLocalRow(table, row.id);
@@ -86,6 +94,13 @@ export async function pushTable(table: LocalTableName): Promise<number> {
 
       if (error) {
         console.warn(`[sync:push:upsert] ${table}/${row.id}`, error.message);
+        await logSyncError({
+          table,
+          row_id: row.id,
+          operation: table === "products" ? "stock" : "push",
+          message: error.message,
+          payload: payload,
+        });
         continue;
       }
 
@@ -100,6 +115,13 @@ export async function pushTable(table: LocalTableName): Promise<number> {
       pushed++;
     } catch (e: any) {
       console.warn(`[sync:push] ${table}/${row.id} threw`, e?.message ?? e);
+      await logSyncError({
+        table,
+        row_id: row.id,
+        operation: "push",
+        message: e?.message ?? String(e),
+        payload: row,
+      });
     }
   }
 

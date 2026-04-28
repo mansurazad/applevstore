@@ -91,7 +91,7 @@ export function POS() {
       }
 
       // 3) Resolve relations locally for the invoice modal.
-      const customer = sale.customer_id
+      const customer: any = sale.customer_id
         ? await localDb.customers.get(sale.customer_id)
         : null;
       const productMap = new Map(
@@ -99,10 +99,29 @@ export function POS() {
       );
       const fullSale = {
         ...sale,
-        customers: customer ?? null,
+        customers: customer
+          ? {
+              name: customer.name,
+              phone: customer.phone ?? null,
+              email: customer.email ?? null,
+              address: customer.address ?? null,
+            }
+          : null,
         sale_items: insertedItems.map((it: any) => ({
           ...it,
-          products: productMap.get(it.product_id) ?? null,
+          products: (() => {
+            const p: any = productMap.get(it.product_id);
+            if (!p) return null;
+            return {
+              name: p.name,
+              sku: p.sku ?? null,
+              imei: p.imei ?? null,
+              brand: p.brand ?? null,
+              model: p.model ?? null,
+              condition: p.condition ?? "new",
+              image_url: p.image_url ?? null,
+            };
+          })(),
         })),
       };
       return fullSale;
@@ -131,6 +150,12 @@ export function POS() {
   });
 
   const addToCart = (product: Product) => {
+    // Offline stock validation: read fresh from local DB.
+    const liveStock = Number(product.stock_quantity ?? 0);
+    if (liveStock <= 0) {
+      toast.error(`${product.name} স্টকে নেই — যোগ করা যাবে না`);
+      return;
+    }
     const existingItem = cart.find(item => item.product.id === product.id);
     if (existingItem) {
       toast.error(`${product.name} ইতিমধ্যে কার্টে আছে`);
@@ -152,6 +177,15 @@ export function POS() {
     if (quantity <= 0) {
       setCart(cart.filter(item => item.product.id !== productId));
     } else {
+      // Block exceeding local stock.
+      const live: any = (products ?? []).find((p: any) => p.id === productId);
+      const available = Number(live?.stock_quantity ?? 0);
+      if (quantity > available) {
+        toast.error(
+          `স্টক অপ্রতুল — সর্বোচ্চ ${available} টি উপলব্ধ`
+        );
+        return;
+      }
       setCart(cart.map(item =>
         item.product.id === productId
           ? { ...item, quantity }
@@ -193,6 +227,21 @@ export function POS() {
   const confirmSale = () => {
     if (getTotal() <= 0) {
       toast.error("বিক্রয় মূল্য ০ হতে পারে না");
+      return;
+    }
+
+    // Final offline stock validation against current local DB.
+    const productMap = new Map((products ?? []).map((p: any) => [p.id, p]));
+    const insufficient: string[] = [];
+    for (const item of cart) {
+      const live: any = productMap.get(item.product.id);
+      const available = Number(live?.stock_quantity ?? 0);
+      if (item.quantity > available) {
+        insufficient.push(`${item.product.name} (চাওয়া ${item.quantity} / আছে ${available})`);
+      }
+    }
+    if (insufficient.length > 0) {
+      toast.error(`স্টক অপ্রতুল: ${insufficient.join(", ")}`, { duration: 8000 });
       return;
     }
 

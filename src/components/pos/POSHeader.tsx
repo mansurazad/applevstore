@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScanBarcode, ChevronUp, ChevronDown } from "lucide-react";
 import { useShopSettings } from "@/hooks/useShopSettings";
+import { SyncStatusBadge } from "@/components/SyncStatusBadge";
+import { SyncErrorPanel } from "@/components/SyncErrorPanel";
 
 interface POSHeaderProps {
   searchTerm: string;
@@ -43,6 +45,8 @@ export function POSHeader({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-foreground truncate">পয়েন্ট অব সেল</h1>
+            <SyncStatusBadge className="hidden sm:inline-flex" />
+            <SyncErrorPanel className="hidden sm:inline-flex" />
             <button
               type="button"
               className="lg:hidden h-7 w-7 inline-flex items-center justify-center rounded-md hover:bg-muted shrink-0"
