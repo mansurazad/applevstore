@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import defaultLogo from "@/assets/3926e988-d85b-4bf1-8f3e-71bdbe4a2e70.png";
 import { LocalDBProvider } from "@/lib/localdb/LocalDBProvider";
+import { SyncProvider } from "@/lib/sync/SyncProvider";
 
 const queryClient = new QueryClient();
 
@@ -69,13 +70,15 @@ const App = () => {
         <Toaster />
         <Sonner />
         <LocalDBProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/" element={<Index user={user} />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
+          <SyncProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/" element={<Index user={user} />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </SyncProvider>
         </LocalDBProvider>
       </TooltipProvider>
     </QueryClientProvider>
