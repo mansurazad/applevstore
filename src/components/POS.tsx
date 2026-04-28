@@ -106,16 +106,30 @@ export function POS() {
       const productMap = new Map(
         (productsRaw ?? []).map((p: any) => [p.id, p])
       );
+      // Invoice fallback: even if local customer row is missing fields
+      // (e.g. phone/email not captured), build a clean object so the
+      // invoice still renders without "undefined" text. Falls back to
+      // instant-customer fields, then to a generic walk-in label.
+      const cleanStr = (v: any) =>
+        typeof v === "string" && v.trim() ? v.trim() : null;
+      const fallbackName =
+        cleanStr(customer?.name) ??
+        cleanStr(saleData.instant_customer_name) ??
+        "সাধারণ ক্রেতা";
+      const fallbackPhone =
+        cleanStr(customer?.phone) ??
+        cleanStr(saleData.instant_customer_phone);
       const fullSale = {
         ...sale,
-        customers: customer
-          ? {
-              name: customer.name,
-              phone: customer.phone ?? null,
-              email: customer.email ?? null,
-              address: customer.address ?? null,
-            }
-          : null,
+        customers:
+          customer || saleData.instant_customer_name
+            ? {
+                name: fallbackName,
+                phone: fallbackPhone,
+                email: cleanStr(customer?.email),
+                address: cleanStr(customer?.address),
+              }
+            : null,
         sale_items: insertedItems.map((it: any) => ({
           ...it,
           products: (() => {
