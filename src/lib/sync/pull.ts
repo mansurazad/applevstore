@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getActiveLocalDB } from "@/lib/localdb";
 import type { LocalTableName } from "@/lib/localdb/adapter";
 import { SYNC_TABLES, SERVER_WINS_FIELDS, getTimestampField } from "./tables";
+import { recordConflict } from "./conflicts";
 
 /**
  * Read last pull timestamp for a table.
@@ -78,28 +79,26 @@ export async function pullTable(table: LocalTableName): Promise<number> {
         const localTs: string = local[tsField] ?? local.updated_at ?? "";
         const serverIsNewer = rowTs > localTs;
 
-        // Build merged row: start from local (preserve dirty edits)
-        const merged: any = { ...local };
-
-        // Always overwrite server-wins fields
-        for (const f of serverWins) {
-          merged[f] = serverRow[f];
-        }
-
-        // If server is newer overall, accept server fields except those the
-        // local user just edited (local wins for non-server-wins keys).
+        // Detect a real conflict: server has been independently updated
+        // *after* the local row was last edited → user must choose.
         if (serverIsNewer) {
-          for (const k of Object.keys(serverRow)) {
-            if (k.startsWith("_")) continue;
-            if (serverWins.includes(k)) continue;
-            // keep local edit only if local row was created after server row
-            // → otherwise prefer server
-            if (localTs && localTs > rowTs) continue;
-            merged[k] = serverRow[k];
-          }
+          // Apply server-wins fields immediately (e.g. stock_quantity), but
+          // record the rest of the row as a conflict for manual resolution.
+          const merged: any = { ...local };
+          for (const f of serverWins) merged[f] = serverRow[f];
+          await localTable.put(merged);
+          await recordConflict({
+            table,
+            row_id: serverRow.id,
+            local,
+            remote: serverRow,
+          });
+        } else {
+          // Local is newer or same — keep local, just refresh server-wins fields.
+          const merged: any = { ...local };
+          for (const f of serverWins) merged[f] = serverRow[f];
+          await localTable.put(merged);
         }
-
-        await localTable.put(merged);
       } else {
         // Clean local → just take server version
         await localTable.put({

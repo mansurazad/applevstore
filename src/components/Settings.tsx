@@ -18,6 +18,8 @@ import { StaffPerformanceReport } from "@/components/StaffPerformanceReport";
 import { useUserRole } from "@/hooks/useUserRole";
 import { ActivityLogger } from "@/hooks/useActivityLog";
 import { BrandingSettings } from "@/components/BrandingSettings";
+import { SyncSettingsPanel } from "@/components/SyncSettingsPanel";
+import { DesktopBuildWizard } from "@/components/DesktopBuildWizard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -490,6 +492,9 @@ export function Settings() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto pb-6 space-y-6">
+        {/* Cloud sync controls */}
+        <SyncSettingsPanel />
+
         {/* Database Statistics */}
         <Card className="p-6">
         <h2 className="text-xl font-semibold mb-4 text-foreground">📊 Database Statistics</h2>
@@ -688,6 +693,16 @@ export function Settings() {
             </div>
           </div>
         </div>
+      </Card>
+
+      {/* Desktop App Build */}
+      <Card className="p-6">
+        <h2 className="text-xl font-semibold mb-2 text-foreground">🖥️ ডেস্কটপ অ্যাপ</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          এই সফটওয়্যারটি Windows, macOS, এবং Linux-এর জন্য নেটিভ ডেস্কটপ অ্যাপ হিসেবে
+          ইনস্টল করতে পারেন। উইজার্ড আপনার সিস্টেম অনুযায়ী প্রয়োজনীয়তা ও কমান্ড দেখাবে।
+        </p>
+        <DesktopBuildWizard />
       </Card>
 
       {/* Reset Database */}
