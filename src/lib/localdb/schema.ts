@@ -190,3 +190,17 @@ export type SyncState = {
   lastPulledAt?: string;
   lastPushedAt?: string;
 };
+
+/**
+ * Captures push/pull failures so the user can review and retry.
+ */
+export type SyncError = {
+  id: string;            // primary key (uuid)
+  table: string;         // affected local table
+  row_id?: string | null;// row id that failed (if applicable)
+  operation: "push" | "pull" | "delete" | "stock";
+  message: string;       // human-readable error
+  payload?: any;         // serialized row/payload for debugging
+  created_at: string;    // ISO timestamp
+  resolved?: 0 | 1;      // 1 once successfully retried/cleared
+};
