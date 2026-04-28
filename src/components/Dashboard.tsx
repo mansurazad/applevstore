@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +10,8 @@ import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { Badge } from "@/components/ui/badge";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, CartesianGrid } from "recharts";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 interface DashboardProps {
   onNavigateToPOS?: () => void;
@@ -22,59 +23,56 @@ export function Dashboard({ onNavigateToPOS, onNavigateToProducts }: DashboardPr
   const [showHeaderInfo, setShowHeaderInfo] = useState(true);
   const { containerRef, headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
 
-  const { data: products, isLoading: productsLoading } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("products").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const products = useLiveQuery(() => localDb.products.list(), []);
+  const productsLoading = products === undefined;
+  const rawSales = useLiveQuery(() => localDb.sales.list(), []);
+  const rawSaleItems = useLiveQuery(() => localDb.saleItems.list(), []);
+  const salesLoading = rawSales === undefined || rawSaleItems === undefined;
+  const customers = useLiveQuery(() => localDb.customers.list(), []);
+  const investmentEntries = useLiveQuery(() => localDb.investmentEntries.list(), []);
+  const investmentIncomes = useLiveQuery(() => localDb.investmentIncomes.list(), []);
 
-  const { data: sales, isLoading: salesLoading } = useQuery({
-    queryKey: ["sales"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("sales").select("*, sale_items(*, products(condition, name, cost))");
-      if (error) throw error;
-      return data;
-    },
-  });
+  // Reconstruct sales with sale_items + products(condition,name,cost)
+  const sales = useMemo(() => {
+    if (salesLoading) return undefined;
+    const productMap = new Map((products ?? []).map((p: any) => [p.id, p]));
+    const itemsBySale = new Map<string, any[]>();
+    for (const it of rawSaleItems ?? []) {
+      const arr = itemsBySale.get((it as any).sale_id) ?? [];
+      const p: any = productMap.get((it as any).product_id);
+      arr.push({
+        ...it,
+        products: p
+          ? { condition: p.condition ?? "new", name: p.name, cost: p.cost }
+          : null,
+      });
+      itemsBySale.set((it as any).sale_id, arr);
+    }
+    return (rawSales ?? []).map((s: any) => ({
+      ...s,
+      sale_items: itemsBySale.get(s.id) ?? [],
+    }));
+  }, [salesLoading, rawSales, rawSaleItems, products]);
 
-  const { data: investmentEntries } = useQuery({
-    queryKey: ["investment-entries"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("investment_entries").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: investmentIncomes } = useQuery({
-    queryKey: ["investment-incomes"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("investment_incomes").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: dueSales } = useQuery({
-    queryKey: ["due-sales-summary"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("sales").select("id, total_amount, paid_amount, due_amount, customer_id, instant_customer_name, customers(name, phone)").gt("due_amount", 0);
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("customers").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
+  // Due sales summary with customer name/phone
+  const dueSales = useMemo(() => {
+    if (salesLoading || customers === undefined) return undefined;
+    const customerMap = new Map((customers ?? []).map((c: any) => [c.id, c]));
+    return (rawSales ?? [])
+      .filter((s: any) => Number(s.due_amount) > 0)
+      .map((s: any) => {
+        const c: any = s.customer_id ? customerMap.get(s.customer_id) : null;
+        return {
+          id: s.id,
+          total_amount: s.total_amount,
+          paid_amount: s.paid_amount,
+          due_amount: s.due_amount,
+          customer_id: s.customer_id,
+          instant_customer_name: s.instant_customer_name,
+          customers: c ? { name: c.name, phone: c.phone ?? null } : null,
+        };
+      });
+  }, [salesLoading, rawSales, customers]);
 
   const totalProducts = products?.length || 0;
   const outOfStockProducts = products?.filter(p => p.stock_quantity <= 0).length || 0;
