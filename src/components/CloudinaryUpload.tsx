@@ -1,8 +1,13 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Upload, Camera, X, Loader2 } from "lucide-react";
-import { uploadToCloudinary, isCloudinaryUrl } from "@/lib/cloudinary";
+import {
+  uploadToCloudinary,
+  isCloudinaryUrl,
+  ALLOWED_IMAGE_MIME,
+  MAX_UPLOAD_BYTES,
+} from "@/lib/cloudinary";
 
 interface CloudinaryUploadProps {
   currentImageUrl?: string | null;
@@ -23,25 +28,49 @@ export function CloudinaryUpload({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const objectUrlRef = useRef<string | null>(null);
+
+  // Free the temporary blob URL when component unmounts or preview changes.
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    if (!file.type.startsWith("image/")) {
-      toast.error("শুধুমাত্র ছবি ফাইল আপলোড করা যাবে");
+    // Validate file type — strict allow-list (HEIC etc. supported)
+    const mime = (file.type || "").toLowerCase();
+    if (!mime.startsWith("image/") || (mime && !ALLOWED_IMAGE_MIME.includes(mime))) {
+      toast.error("শুধুমাত্র ছবি ফাইল (JPG/PNG/WEBP/HEIC) আপলোড করা যাবে");
+      e.target.value = "";
+      return;
+    }
+    if (file.size === 0) {
+      toast.error("ফাইলটি খালি — অন্য একটি ছবি বাছুন");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(
+        `ছবির সাইজ ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB এর বেশি হতে পারবে না`
+      );
+      e.target.value = "";
       return;
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("ছবির সাইজ ১০MB এর বেশি হতে পারবে না");
-      return;
+    // Show local preview immediately — revoke any previous blob first.
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
     }
-
-    // Show local preview immediately
     const localPreview = URL.createObjectURL(file);
+    objectUrlRef.current = localPreview;
     setPreviewUrl(localPreview);
 
     setUploading(true);
@@ -49,8 +78,18 @@ export function CloudinaryUpload({
       const result = await uploadToCloudinary(file, folder);
       onUpload(result.secure_url);
       toast.success("ছবি সফলভাবে আপলোড হয়েছে!");
+      // Drop the temp blob now that we have the real CDN URL.
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      setPreviewUrl(null);
     } catch (error: any) {
       toast.error(error.message || "ছবি আপলোড ব্যর্থ");
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
       setPreviewUrl(null);
     } finally {
       setUploading(false);
@@ -63,6 +102,10 @@ export function CloudinaryUpload({
   const displayUrl = previewUrl || currentImageUrl;
 
   const handleRemove = () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
     setPreviewUrl(null);
     onUpload("");
   };
