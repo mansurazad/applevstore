@@ -1,12 +1,24 @@
-import { useState } from "react";
-import { AlertTriangle, RefreshCw, X, RotateCcw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, RefreshCw, X, RotateCcw, ListFilter } from "lucide-react";
 import { useLiveQuery } from "@/hooks/useLiveQuery";
-import { listUnresolvedErrors, markErrorResolved, clearAllErrors } from "@/lib/sync/errors";
+import {
+  listUnresolvedErrors,
+  markErrorResolved,
+  clearAllErrors,
+  clearResolvedErrors,
+} from "@/lib/sync/errors";
 import { useSync } from "@/lib/sync/SyncProvider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { bn } from "date-fns/locale";
@@ -25,24 +37,51 @@ const opLabel: Record<string, string> = {
  */
 export function SyncErrorPanel({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
+  const [opFilter, setOpFilter] = useState<string>("all");
+  const [tableFilter, setTableFilter] = useState<string>("all");
   const errors = useLiveQuery(() => listUnresolvedErrors(), []);
   const { syncing, syncNow } = useSync();
 
   const count = errors?.length ?? 0;
+
+  const tableOptions = useMemo(() => {
+    const set = new Set<string>();
+    (errors ?? []).forEach((e) => set.add(e.table));
+    return Array.from(set).sort();
+  }, [errors]);
+
+  const filtered = useMemo(() => {
+    return (errors ?? []).filter((e) => {
+      if (opFilter !== "all" && e.operation !== opFilter) return false;
+      if (tableFilter !== "all" && e.table !== tableFilter) return false;
+      return true;
+    });
+  }, [errors, opFilter, tableFilter]);
+
   if (count === 0) return null;
 
   const handleRetry = async () => {
     const res = await syncNow();
     if (res?.ok) {
-      toast.success("পুনরায় sync সম্পন্ন — সমাধানযোগ্য ত্রুটি মুছে ফেলা হয়েছে");
       // Errors that no longer recur will be replaced by fresh ones, but
       // older ones for already-pushed rows can be marked resolved.
       const remaining = await listUnresolvedErrors();
       const seen = new Set(remaining.map((e) => `${e.table}|${e.row_id}|${e.operation}`));
+      let resolvedCount = 0;
       for (const old of errors ?? []) {
         const key = `${old.table}|${old.row_id}|${old.operation}`;
-        if (!seen.has(key)) await markErrorResolved(old.id);
+        if (!seen.has(key)) {
+          await markErrorResolved(old.id);
+          resolvedCount++;
+        }
       }
+      // Hard-delete the rows we just marked resolved so the log stays clean.
+      await clearResolvedErrors();
+      toast.success(
+        resolvedCount > 0
+          ? `পুনরায় sync সম্পন্ন — ${resolvedCount} টি ত্রুটি সমাধান হয়েছে`
+          : "পুনরায় sync সম্পন্ন — কোনো ত্রুটি সমাধান হয়নি"
+      );
     } else {
       toast.error("Sync ব্যর্থ — পরে আবার চেষ্টা করুন");
     }
@@ -74,14 +113,14 @@ export function SyncErrorPanel({ className }: { className?: string }) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Sync ত্রুটি লগ ({count})
+              Sync ত্রুটি লগ ({filtered.length}/{count})
             </DialogTitle>
           </DialogHeader>
 
           <div className="flex flex-wrap gap-2 mb-3">
             <Button onClick={handleRetry} disabled={syncing} size="sm" className="gap-2">
               <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
-              পুনরায় চেষ্টা
+              সব ব্যর্থ sync পুনরায় চেষ্টা
             </Button>
             <Button onClick={handleDismissAll} variant="outline" size="sm" className="gap-2">
               <RotateCcw className="h-4 w-4" />
@@ -89,9 +128,56 @@ export function SyncErrorPanel({ className }: { className?: string }) {
             </Button>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <ListFilter className="h-4 w-4 text-muted-foreground" />
+            <Select value={opFilter} onValueChange={setOpFilter}>
+              <SelectTrigger className="h-8 w-[160px] text-xs">
+                <SelectValue placeholder="অপারেশন" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">সব অপারেশন</SelectItem>
+                <SelectItem value="push">আপলোড (push)</SelectItem>
+                <SelectItem value="pull">ডাউনলোড (pull)</SelectItem>
+                <SelectItem value="stock">স্টক আপডেট</SelectItem>
+                <SelectItem value="delete">মুছে ফেলা</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={tableFilter} onValueChange={setTableFilter}>
+              <SelectTrigger className="h-8 w-[160px] text-xs">
+                <SelectValue placeholder="টেবিল" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">সব টেবিল</SelectItem>
+                {tableOptions.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(opFilter !== "all" || tableFilter !== "all") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  setOpFilter("all");
+                  setTableFilter("all");
+                }}
+              >
+                ফিল্টার রিসেট
+              </Button>
+            )}
+          </div>
+
           <ScrollArea className="h-[400px] pr-3">
             <div className="space-y-2">
-              {(errors ?? []).map((err) => (
+              {filtered.length === 0 && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  এই ফিল্টারে কোনো ত্রুটি নেই
+                </div>
+              )}
+              {filtered.map((err) => (
                 <div
                   key={err.id}
                   className="border border-border rounded-lg p-3 hover:bg-muted/40"
