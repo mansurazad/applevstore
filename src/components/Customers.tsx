@@ -16,6 +16,8 @@ import { CustomerPDFReport } from "./CustomerPDFReport";
 import { CloudinaryUpload } from "./CloudinaryUpload";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { AutoHideSticky } from "@/components/AutoHideSticky";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 export function Customers() {
   const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
@@ -32,14 +34,16 @@ export function Customers() {
 
   const queryClient = useQueryClient();
 
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("customers").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawCustomers = useLiveQuery(() => localDb.customers.list(), []);
+  const customers = useMemo(
+    () =>
+      rawCustomers
+        ? [...rawCustomers].sort((a: any, b: any) =>
+            (a.name ?? "").localeCompare(b.name ?? "")
+          )
+        : undefined,
+    [rawCustomers]
+  );
 
   // Fetch all sales with dues for customers
   const { data: customerDues } = useQuery({
@@ -71,8 +75,7 @@ export function Customers() {
 
   const addMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { error } = await supabase.from("customers").insert([data]);
-      if (error) throw error;
+      await localDb.customers.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
@@ -85,8 +88,7 @@ export function Customers() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const { error } = await supabase.from("customers").update(data).eq("id", id);
-      if (error) throw error;
+      await localDb.customers.update(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
@@ -99,8 +101,7 @@ export function Customers() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("customers").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.customers.remove(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
