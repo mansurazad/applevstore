@@ -205,12 +205,12 @@ export function Investments() {
   const startEditIncome = (income: any) => { setEditIncomeId(income.id); setSelectedSectorId(income.sector_id); setIncomeAmount(String(income.amount)); setIncomeSource(income.source || ""); setIncomePurpose(income.purpose || ""); setIncomeNotes(income.notes || ""); setIncomeDate(income.income_date); setShowEditIncome(true); };
 
   // Stats
-  const sectorStats = sectors?.map(sector => {
-    const sectorEntries = entries?.filter(e => e.sector_id === sector.id) || [];
-    const sectorIncomes = incomes?.filter(i => i.sector_id === sector.id) || [];
-    const totalDeposit = sectorEntries.filter(e => e.entry_type === 'deposit').reduce((s, e) => s + Number(e.amount), 0);
-    const totalWithdraw = sectorEntries.filter(e => e.entry_type === 'withdraw').reduce((s, e) => s + Number(e.amount), 0);
-    const totalIncome = sectorIncomes.reduce((s, i) => s + Number(i.amount), 0);
+  const sectorStats = (sectors as any[] | undefined)?.map((sector: any) => {
+    const sectorEntries = (entries as any[] | undefined)?.filter((e: any) => e.sector_id === sector.id) || [];
+    const sectorIncomes = (incomes as any[] | undefined)?.filter((i: any) => i.sector_id === sector.id) || [];
+    const totalDeposit = sectorEntries.filter((e: any) => e.entry_type === 'deposit').reduce((s: number, e: any) => s + Number(e.amount), 0);
+    const totalWithdraw = sectorEntries.filter((e: any) => e.entry_type === 'withdraw').reduce((s: number, e: any) => s + Number(e.amount), 0);
+    const totalIncome = sectorIncomes.reduce((s: number, i: any) => s + Number(i.amount), 0);
     return { ...sector, totalDeposit, totalWithdraw, totalIncome, netInvestment: totalDeposit - totalWithdraw };
   }) || [];
 
