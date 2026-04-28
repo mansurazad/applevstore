@@ -1,5 +1,4 @@
-import { useState, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,8 @@ import { useReactToPrint } from "react-to-print";
 import * as XLSX from "xlsx";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { AutoHideSticky } from "@/components/AutoHideSticky";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 export function Reports() {
   const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
@@ -18,35 +19,45 @@ export function Reports() {
   const [filterPaymentMethod, setFilterPaymentMethod] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
-  const { data: sales } = useQuery({
-    queryKey: ["sales"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sales")
-        .select("*, sale_items(*, products(name)), customers(name)")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawSales = useLiveQuery(() => localDb.sales.list(), []);
+  const rawSaleItems = useLiveQuery(() => localDb.saleItems.list(), []);
+  const products = useLiveQuery(() => localDb.products.list(), []);
+  const rawCustomers = useLiveQuery(() => localDb.customers.list(), []);
+  const customers = useMemo(
+    () =>
+      rawCustomers
+        ? [...rawCustomers].sort((a: any, b: any) =>
+            (a.name ?? "").localeCompare(b.name ?? "")
+          )
+        : undefined,
+    [rawCustomers]
+  );
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("products").select("*");
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("customers").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const sales = useMemo(() => {
+    if (rawSales === undefined || rawSaleItems === undefined) return undefined;
+    const productMap = new Map((products ?? []).map((p: any) => [p.id, p]));
+    const customerMap = new Map((rawCustomers ?? []).map((c: any) => [c.id, c]));
+    const itemsBySale = new Map<string, any[]>();
+    for (const it of rawSaleItems) {
+      const arr = itemsBySale.get((it as any).sale_id) ?? [];
+      const p: any = productMap.get((it as any).product_id);
+      arr.push({ ...it, products: p ? { name: p.name } : null });
+      itemsBySale.set((it as any).sale_id, arr);
+    }
+    return [...rawSales]
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      .map((s: any) => {
+        const c: any = s.customer_id ? customerMap.get(s.customer_id) : null;
+        return {
+          ...s,
+          sale_items: itemsBySale.get(s.id) ?? [],
+          customers: c ? { name: c.name } : null,
+        };
+      });
+  }, [rawSales, rawSaleItems, products, rawCustomers]);
 
   // Filter sales based on selected filters
   const filteredSales = sales?.filter(sale => {
