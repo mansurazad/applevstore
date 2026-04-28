@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { ActivityLogger } from "@/hooks/useActivityLog";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { db as localDb } from "@/lib/db";
 import { useLiveQuery } from "@/hooks/useLiveQuery";
+import { saleSchema } from "@/lib/validation/posSchemas";
 
 // Sub-components
 import { CartItem, Product, Customer } from "./pos/types";
@@ -16,6 +17,7 @@ import { CartSection } from "./pos/CartSection";
 import { ProductGrid } from "./pos/ProductGrid";
 import { PaymentSection } from "./pos/PaymentSection";
 import { SaleConfirmDialog } from "./pos/SaleConfirmDialog";
+import { ImeiVerifyPanel } from "./pos/ImeiVerifyPanel";
 
 export function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -33,6 +35,7 @@ export function POS() {
   const [instantCustomerPhone, setInstantCustomerPhone] = useState("");
   const [paidAmount, setPaidAmount] = useState(0);
   const [saleImageUrl, setSaleImageUrl] = useState("");
+  const [verifiedImeis, setVerifiedImeis] = useState<Set<string>>(new Set());
   const { containerRef, headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
 
   const queryClient = useQueryClient();
@@ -58,6 +61,23 @@ export function POS() {
       Number(p.stock_quantity ?? 0),
     ])
   );
+
+  // Drop verifications that no longer apply (item removed from cart).
+  useEffect(() => {
+    const cartImeis = new Set(
+      cart
+        .map((c) => (c.product.imei ?? "").trim())
+        .filter(Boolean)
+    );
+    let changed = false;
+    const next = new Set<string>();
+    verifiedImeis.forEach((v) => {
+      if (cartImeis.has(v)) next.add(v);
+      else changed = true;
+    });
+    if (changed) setVerifiedImeis(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart]);
 
   const completeSaleMutation = useMutation({
     mutationFn: async (saleData: any) => {
@@ -174,7 +194,9 @@ export function POS() {
 
   const addToCart = (product: Product) => {
     // Offline stock validation: read fresh from local DB.
-    const liveStock = Number(product.stock_quantity ?? 0);
+    const liveStock = Number(
+      liveStockMap.get(product.id) ?? product.stock_quantity ?? 0
+    );
     if (liveStock <= 0) {
       toast.error(`${product.name} স্টকে নেই — যোগ করা যাবে না`);
       return;
@@ -184,11 +206,21 @@ export function POS() {
       toast.error(`${product.name} ইতিমধ্যে কার্টে আছে`);
       return;
     }
+    // Reject products with malformed IMEI (must be 15 digits when present)
+    const imei = (product.imei ?? "").trim();
+    if (imei && !/^\d{15}$/.test(imei)) {
+      toast.error(`${product.name} এর IMEI বৈধ নয় (১৫ ডিজিট নয়)`);
+      return;
+    }
     setCart([...cart, { product, quantity: 1, customPrice: Number(product.price) }]);
     toast.success(`${product.name} কার্টে যোগ হয়েছে`);
   };
 
   const updatePrice = (productId: string, price: number) => {
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("মূল্য ০ বা তার বেশি হতে হবে");
+      return;
+    }
     setCart(cart.map(item =>
       item.product.id === productId
         ? { ...item, customPrice: price }
@@ -197,16 +229,21 @@ export function POS() {
   };
 
   const updateQuantity = (productId: string, quantity: number) => {
+    if (!Number.isFinite(quantity)) return;
     if (quantity <= 0) {
       setCart(cart.filter(item => item.product.id !== productId));
     } else {
-      // Block exceeding local stock.
-      const live: any = (products ?? []).find((p: any) => p.id === productId);
-      const available = Number(live?.stock_quantity ?? 0);
+      // Block exceeding local stock — read fresh from liveStockMap so this
+      // reflects the very latest IndexedDB value (incl. concurrent updates).
+      const available = Number(liveStockMap.get(productId) ?? 0);
       if (quantity > available) {
         toast.error(
           `স্টক অপ্রতুল — সর্বোচ্চ ${available} টি উপলব্ধ`
         );
+        return;
+      }
+      if (!Number.isInteger(quantity)) {
+        toast.error("পরিমাণ পূর্ণসংখ্যা হতে হবে");
         return;
       }
       setCart(cart.map(item =>
@@ -248,11 +285,6 @@ export function POS() {
   };
 
   const confirmSale = () => {
-    if (getTotal() <= 0) {
-      toast.error("বিক্রয় মূল্য ০ হতে পারে না");
-      return;
-    }
-
     // Final offline stock validation against current local DB.
     const productMap = new Map((products ?? []).map((p: any) => [p.id, p]));
     const insufficient: string[] = [];
@@ -309,6 +341,19 @@ export function POS() {
       }
     }
 
+    // Require physical IMEI verification for every IMEI-bearing cart item.
+    const requiredImeis = cart
+      .map((c) => (c.product.imei ?? "").trim())
+      .filter(Boolean);
+    const unverified = requiredImeis.filter((v) => !verifiedImeis.has(v));
+    if (unverified.length > 0) {
+      toast.error(
+        `IMEI যাচাই বাকি: ${unverified.join(", ")} — চেকআউটের আগে স্ক্যান/টাইপ করে যাচাই করুন`,
+        { duration: 9000 }
+      );
+      return;
+    }
+
     const dueAmount = Math.max(0, getTotal() - paidAmount);
 
     const saleData = {
@@ -328,13 +373,42 @@ export function POS() {
       })),
     };
 
+    // Schema validation — single source of truth for sale shape.
+    const parsed = saleSchema.safeParse(saleData);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      toast.error(first?.message ?? "ইনপুট বৈধ নয়", { duration: 8000 });
+      return;
+    }
+
     setShowConfirmDialog(false);
     completeSaleMutation.mutate(saleData);
   };
 
   const handleBarcodeScanned = (barcode: string) => {
+    const value = barcode.trim();
+    if (!value) return;
+
+    // If user is mid-IMEI-verify (cart not empty, scanned value matches a
+    // cart item's IMEI), treat the scan as a verification action instead of
+    // re-adding the product.
+    const verifyHit = cart.find(
+      (c) => (c.product.imei ?? "").trim() === value
+    );
+    if (verifyHit && /^\d{15}$/.test(value)) {
+      if (verifiedImeis.has(value)) {
+        toast.info("এই IMEI ইতিমধ্যে যাচাই করা হয়েছে");
+      } else {
+        const next = new Set(verifiedImeis);
+        next.add(value);
+        setVerifiedImeis(next);
+        toast.success(`✓ IMEI যাচাই — ${verifyHit.product.name}`);
+      }
+      return;
+    }
+
     const product = products?.find(p => 
-      p.barcode === barcode || p.imei === barcode
+      p.barcode === value || p.imei === value
     );
 
     if (product) {
@@ -367,6 +441,14 @@ export function POS() {
   });
 
   const total = getTotal();
+
+  // Reset verified IMEIs after a successful sale.
+  useEffect(() => {
+    if (cart.length === 0 && verifiedImeis.size > 0) {
+      setVerifiedImeis(new Set());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.length]);
 
   return (
     <div className="flex flex-col h-screen animate-fade-in pb-16 lg:pb-0">
@@ -402,6 +484,16 @@ export function POS() {
               total={total}
               liveStockMap={liveStockMap}
             />
+            <div className="mt-3">
+              <ImeiVerifyPanel
+                cart={cart}
+                allProducts={productsRaw ?? []}
+                allSaleItems={saleItemsRaw ?? []}
+                onOpenScanner={() => setShowScanner(true)}
+                verified={verifiedImeis}
+                onVerifiedChange={setVerifiedImeis}
+              />
+            </div>
             <div className="mt-4">
               <PaymentSection
                 customers={customers}
