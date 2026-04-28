@@ -14,8 +14,9 @@ interface ImeiVerifyPanelProps {
   /** All sale_items from local DB (synced + pending) for re-sale guard. */
   allSaleItems: any[];
   onOpenScanner: () => void;
-  /** Opens once an IMEI is verified — caller can highlight cart row. */
-  onVerified?: (productId: string) => void;
+  /** Controlled verified-IMEI set, owned by parent (POS) so confirmSale can read it. */
+  verified: Set<string>;
+  onVerifiedChange: (next: Set<string>) => void;
 }
 
 /**
@@ -30,10 +31,10 @@ export function ImeiVerifyPanel({
   allProducts,
   allSaleItems,
   onOpenScanner,
-  onVerified,
+  verified,
+  onVerifiedChange,
 }: ImeiVerifyPanelProps) {
   const [imei, setImei] = useState("");
-  const [verified, setVerified] = useState<Set<string>>(new Set()); // imei strings
 
   const verify = () => {
     const value = imei.trim();
@@ -68,16 +69,15 @@ export function ImeiVerifyPanel({
 
     const next = new Set(verified);
     next.add(value);
-    setVerified(next);
+    onVerifiedChange(next);
     setImei("");
     toast.success(`✓ IMEI যাচাই সফল — ${cartHit.product.name}`);
-    onVerified?.(cartHit.product.id);
   };
 
   const removeVerified = (value: string) => {
     const next = new Set(verified);
     next.delete(value);
-    setVerified(next);
+    onVerifiedChange(next);
   };
 
   // Pending = cart items with IMEI not yet verified
@@ -166,14 +166,4 @@ export function ImeiVerifyPanel({
       )}
     </Card>
   );
-}
-
-/** Hook helper to share verified IMEI set with parent (POS page). */
-export function useImeiVerification() {
-  const [verified, setVerified] = useState<Set<string>>(new Set());
-  return {
-    verified,
-    add: (imei: string) => setVerified((s) => new Set(s).add(imei)),
-    clear: () => setVerified(new Set()),
-  };
 }
