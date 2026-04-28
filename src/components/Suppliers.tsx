@@ -11,6 +11,8 @@ import { toast } from "sonner";
 import { CloudinaryUpload } from "./CloudinaryUpload";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { AutoHideSticky } from "@/components/AutoHideSticky";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 export function Suppliers() {
   const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
@@ -29,14 +31,12 @@ export function Suppliers() {
 
   const queryClient = useQueryClient();
 
-  const { data: suppliers } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("suppliers").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawSuppliers = useLiveQuery(() => localDb.suppliers.list(), []);
+  const suppliers = rawSuppliers
+    ? [...rawSuppliers].sort((a: any, b: any) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      )
+    : undefined;
 
   const { data: purchases } = useQuery({
     queryKey: ["purchases"],
@@ -50,19 +50,16 @@ export function Suppliers() {
     },
   });
 
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("products").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawProducts = useLiveQuery(() => localDb.products.list(), []);
+  const products = rawProducts
+    ? [...rawProducts].sort((a: any, b: any) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      )
+    : undefined;
 
   const addSupplierMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { error } = await supabase.from("suppliers").insert([data]);
-      if (error) throw error;
+      await localDb.suppliers.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
@@ -74,8 +71,7 @@ export function Suppliers() {
 
   const updateSupplierMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const { error } = await supabase.from("suppliers").update(data).eq("id", id);
-      if (error) throw error;
+      await localDb.suppliers.update(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
@@ -87,8 +83,7 @@ export function Suppliers() {
 
   const deleteSupplierMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("suppliers").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.suppliers.remove(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
