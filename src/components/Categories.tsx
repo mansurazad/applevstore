@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
 
 export function Categories() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -16,19 +18,16 @@ export function Categories() {
 
   const queryClient = useQueryClient();
 
-  const { data: categories } = useQuery({
-    queryKey: ["categories"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("categories").select("*").order("name");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const rawCategories = useLiveQuery(() => localDb.categories.list(), []);
+  const categories = rawCategories
+    ? [...rawCategories].sort((a: any, b: any) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      )
+    : undefined;
 
   const addMutation = useMutation({
     mutationFn: async (data: any) => {
-      const { error } = await supabase.from("categories").insert([data]);
-      if (error) throw error;
+      await localDb.categories.create(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["categories"] });
@@ -43,8 +42,7 @@ export function Categories() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("categories").delete().eq("id", id);
-      if (error) throw error;
+      await localDb.categories.remove(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["categories"] });

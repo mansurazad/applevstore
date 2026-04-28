@@ -14,6 +14,9 @@ import { bn } from "date-fns/locale";
 import { RotateCcw, Search, Package, Calendar, User, CheckCircle, XCircle, Clock } from "lucide-react";
 import { useAutoHideHeader } from "@/hooks/useAutoHideHeader";
 import { AutoHideSticky } from "@/components/AutoHideSticky";
+import { db as localDb } from "@/lib/db";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
+import { useMemo } from "react";
 
 export function Returns() {
   const { containerRef, headerRef, hidden, headerHeight } = useAutoHideHeader<HTMLDivElement>();
@@ -28,37 +31,53 @@ export function Returns() {
 
   const queryClient = useQueryClient();
 
-  // Fetch returns
-  const { data: returns, isLoading } = useQuery({
-    queryKey: ["returns"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("returns")
-        .select(`
-          *,
-          sales (
-            id,
-            total_amount,
-            created_at,
-            customers (name, phone)
-          ),
-          sale_items (
-            quantity,
-            unit_price,
-            total_price
-          ),
-          products (
-            name,
-            imei,
-            brand
-          )
-        `)
-        .order("created_at", { ascending: false });
-      
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  // Offline-first reads
+  const rawReturns = useLiveQuery(() => localDb.returns.list(), []);
+  const rawSales = useLiveQuery(() => localDb.sales.list(), []);
+  const rawSaleItems = useLiveQuery(() => localDb.saleItems.list(), []);
+  const rawCustomers = useLiveQuery(() => localDb.customers.list(), []);
+  const rawProducts = useLiveQuery(() => localDb.products.list(), []);
+  const isLoading =
+    rawReturns === undefined ||
+    rawSales === undefined ||
+    rawSaleItems === undefined ||
+    rawProducts === undefined;
+
+  const returns = useMemo(() => {
+    if (isLoading) return [];
+    const customerMap = new Map((rawCustomers ?? []).map((c: any) => [c.id, c]));
+    const productMap = new Map((rawProducts ?? []).map((p: any) => [p.id, p]));
+    const saleMap = new Map((rawSales ?? []).map((s: any) => [s.id, s]));
+    const itemMap = new Map((rawSaleItems ?? []).map((it: any) => [it.id, it]));
+    return [...(rawReturns ?? [])]
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      .map((r: any) => {
+        const sale: any = saleMap.get(r.sale_id);
+        const customer: any = sale?.customer_id ? customerMap.get(sale.customer_id) : null;
+        const item: any = itemMap.get(r.sale_item_id);
+        const product: any = productMap.get(r.product_id);
+        return {
+          ...r,
+          sales: sale
+            ? {
+                id: sale.id,
+                total_amount: sale.total_amount,
+                created_at: sale.created_at,
+                customers: customer ? { name: customer.name, phone: customer.phone ?? null } : null,
+              }
+            : null,
+          sale_items: item
+            ? { quantity: item.quantity, unit_price: item.unit_price, total_price: item.total_price }
+            : null,
+          products: product
+            ? { name: product.name, imei: product.imei ?? null, brand: product.brand ?? null }
+            : null,
+        };
+      });
+  }, [isLoading, rawReturns, rawSales, rawSaleItems, rawCustomers, rawProducts]);
 
   // Search for sale
   const searchSale = async () => {
@@ -97,8 +116,7 @@ export function Returns() {
   // Create return mutation
   const createReturnMutation = useMutation({
     mutationFn: async (returnData: any) => {
-      const { error } = await supabase.from("returns").insert([returnData]);
-      if (error) throw error;
+      await localDb.returns.create(returnData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["returns"] });
