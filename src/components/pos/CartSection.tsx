@@ -11,6 +11,8 @@ interface CartSectionProps {
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onRemoveItem: (productId: string) => void;
   total: number;
+  /** Live local stock per product id (from IndexedDB). */
+  liveStockMap?: Map<string, number>;
 }
 
 export function CartSection({
@@ -21,6 +23,7 @@ export function CartSection({
   onUpdateQuantity,
   onRemoveItem,
   total,
+  liveStockMap,
 }: CartSectionProps) {
   return (
     <Card className="p-4 lg:p-6">
@@ -54,6 +57,27 @@ export function CartSection({
                         className="w-20 lg:w-24 h-7 text-xs"
                       />
                     </div>
+                    {(() => {
+                      const live = liveStockMap?.get(item.product.id);
+                      const stock = typeof live === "number"
+                        ? live
+                        : Number(item.product.stock_quantity ?? 0);
+                      const remaining = stock - item.quantity;
+                      const tone =
+                        remaining < 0
+                          ? "text-destructive"
+                          : remaining === 0
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-muted-foreground";
+                      return (
+                        <p className={`text-[10px] mt-1 ${tone}`}>
+                          লোকাল স্টক: {stock}{" "}
+                          {remaining < 0
+                            ? `(অপ্রতুল ${Math.abs(remaining)})`
+                            : `(বাকি ${remaining})`}
+                        </p>
+                      );
+                    })()}
                   </div>
                   <div className="flex items-center gap-1 lg:gap-2 flex-shrink-0">
                     <span className="w-6 lg:w-8 text-center font-semibold text-sm">1</span>

@@ -39,6 +39,7 @@ export function POS() {
 
   const productsRaw = useLiveQuery(() => localDb.products.list(), []);
   const customersRaw = useLiveQuery(() => localDb.customers.list(), []);
+  const saleItemsRaw = useLiveQuery(() => localDb.saleItems.list(), []);
   const products = productsRaw
     ? ([...productsRaw].sort((a: any, b: any) =>
         (a.name ?? "").localeCompare(b.name ?? "")
@@ -49,6 +50,14 @@ export function POS() {
         (a.name ?? "").localeCompare(b.name ?? "")
       ) as Customer[])
     : undefined;
+
+  // Live local stock map keyed by product id, for cart indicators + validation.
+  const liveStockMap = new Map<string, number>(
+    (productsRaw ?? []).map((p: any) => [
+      p.id,
+      Number(p.stock_quantity ?? 0),
+    ])
+  );
 
   const completeSaleMutation = useMutation({
     mutationFn: async (saleData: any) => {
@@ -97,16 +106,30 @@ export function POS() {
       const productMap = new Map(
         (productsRaw ?? []).map((p: any) => [p.id, p])
       );
+      // Invoice fallback: even if local customer row is missing fields
+      // (e.g. phone/email not captured), build a clean object so the
+      // invoice still renders without "undefined" text. Falls back to
+      // instant-customer fields, then to a generic walk-in label.
+      const cleanStr = (v: any) =>
+        typeof v === "string" && v.trim() ? v.trim() : null;
+      const fallbackName =
+        cleanStr(customer?.name) ??
+        cleanStr(saleData.instant_customer_name) ??
+        "সাধারণ ক্রেতা";
+      const fallbackPhone =
+        cleanStr(customer?.phone) ??
+        cleanStr(saleData.instant_customer_phone);
       const fullSale = {
         ...sale,
-        customers: customer
-          ? {
-              name: customer.name,
-              phone: customer.phone ?? null,
-              email: customer.email ?? null,
-              address: customer.address ?? null,
-            }
-          : null,
+        customers:
+          customer || saleData.instant_customer_name
+            ? {
+                name: fallbackName,
+                phone: fallbackPhone,
+                email: cleanStr(customer?.email),
+                address: cleanStr(customer?.address),
+              }
+            : null,
         sale_items: insertedItems.map((it: any) => ({
           ...it,
           products: (() => {
@@ -245,6 +268,47 @@ export function POS() {
       return;
     }
 
+    // Offline duplicate-IMEI guard:
+    //   (a) two cart lines must not share an IMEI
+    //   (b) an IMEI already attached to a previously sold local sale_item
+    //       (synced or pending sync) cannot be re-sold
+    const cartImeis = new Map<string, string>(); // imei -> product name
+    for (const item of cart) {
+      const imei = (item.product.imei ?? "").trim();
+      if (!imei) continue;
+      if (cartImeis.has(imei)) {
+        toast.error(
+          `ডুপ্লিকেট IMEI: ${imei} — ${cartImeis.get(imei)} ও ${item.product.name} একই IMEI এ`,
+          { duration: 8000 }
+        );
+        return;
+      }
+      cartImeis.set(imei, item.product.name);
+    }
+
+    if (cartImeis.size > 0) {
+      const productById = new Map(
+        (productsRaw ?? []).map((p: any) => [p.id, p])
+      );
+      const conflicts: string[] = [];
+      for (const it of (saleItemsRaw ?? []) as any[]) {
+        const p: any = productById.get(it.product_id);
+        const imei = (p?.imei ?? "").trim();
+        if (imei && cartImeis.has(imei)) {
+          conflicts.push(`${cartImeis.get(imei)} (IMEI ${imei})`);
+        }
+      }
+      if (conflicts.length > 0) {
+        toast.error(
+          `এই IMEI আগে বিক্রি হয়েছে বা sync হওয়ার অপেক্ষায় আছে: ${conflicts.join(
+            ", "
+          )}`,
+          { duration: 9000 }
+        );
+        return;
+      }
+    }
+
     const dueAmount = Math.max(0, getTotal() - paidAmount);
 
     const saleData = {
@@ -336,6 +400,7 @@ export function POS() {
               onUpdateQuantity={updateQuantity}
               onRemoveItem={removeFromCart}
               total={total}
+              liveStockMap={liveStockMap}
             />
             <div className="mt-4">
               <PaymentSection
