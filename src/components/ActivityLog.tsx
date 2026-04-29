@@ -24,6 +24,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useUserRole } from "@/hooks/useUserRole";
 import { format, formatDistanceToNow, startOfDay, endOfDay, subDays } from "date-fns";
 import { bn } from "date-fns/locale";
+import { useOfflineQuery } from "@/hooks/useOfflineQuery";
+import { LocalDB } from "@/lib/localdb/adapter";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { 
   Activity, 
   Shield, 
@@ -77,28 +80,38 @@ export function ActivityLog() {
   const [dateRange, setDateRange] = useState<string>('7');
   const [activeTab, setActiveTab] = useState<string>('logs');
 
-  const { data: logs, isLoading, refetch } = useQuery({
-    queryKey: ['activity-logs', filterType, dateRange],
-    queryFn: async () => {
+  const { data: logs, isLoading, refetch } = useOfflineQuery<ActivityLogEntry[]>(
+    ['activity-logs', filterType, dateRange],
+    async () => {
       const startDate = subDays(new Date(), parseInt(dateRange));
-      
       let query = supabase
         .from('activity_logs')
         .select('*')
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false })
         .limit(500);
-
-      if (filterType !== 'all') {
-        query = query.eq('action_type', filterType);
-      }
-
+      if (filterType !== 'all') query = query.eq('action_type', filterType);
       const { data, error } = await query;
       if (error) throw error;
       return data as ActivityLogEntry[];
     },
-    enabled: isAdmin || isManager,
-  });
+    async () => {
+      const startMs = subDays(new Date(), parseInt(dateRange)).getTime();
+      const all = await LocalDB.listAll<any>('activity_logs');
+      let filtered = all.filter((l) => {
+        const ts = l.created_at ? new Date(l.created_at).getTime() : 0;
+        if (ts < startMs) return false;
+        if (filterType !== 'all' && l.action_type !== filterType) return false;
+        return true;
+      });
+      filtered.sort((a, b) =>
+        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      );
+      return filtered.slice(0, 500) as ActivityLogEntry[];
+    },
+    undefined,
+    { enabled: isAdmin || isManager }
+  );
 
   // Get unique users from logs
   const uniqueUsers = useMemo(() => {
@@ -251,6 +264,7 @@ export function ActivityLog() {
 
   return (
     <Card className="p-6">
+      <OfflineBanner message="অফলাইনে স্থানীয়ভাবে সিঙ্ক হওয়া অ্যাক্টিভিটি লগ দেখানো হচ্ছে।" />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-2">
           <Activity className="w-6 h-6 text-primary" />
