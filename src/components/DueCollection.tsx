@@ -1,6 +1,9 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { LocalDB } from "@/lib/localdb/adapter";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
+import { useLocalDB } from "@/lib/localdb/LocalDBProvider";
+import { getCurrentUserId } from "@/lib/auth/offlineAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,22 +20,25 @@ interface DueCollectionProps {
 
 export function DueCollection({ saleId, currentDue }: DueCollectionProps) {
   const queryClient = useQueryClient();
+  const { ready } = useLocalDB();
   const [amount, setAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
 
-  const { data: payments } = useQuery({
-    queryKey: ["due-payments", saleId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("due_payments")
-        .select("*")
-        .eq("sale_id", saleId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+  // Local-first read so the panel works offline.
+  const payments = useLiveQuery(
+    async () => {
+      const all = await LocalDB.listWhere<any>(
+        "due_payments",
+        (r) => r.sale_id === saleId
+      );
+      return all.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     },
-  });
+    [ready, saleId]
+  );
 
   const collectMutation = useMutation({
     mutationFn: async () => {
@@ -41,28 +47,25 @@ export function DueCollection({ saleId, currentDue }: DueCollectionProps) {
         throw new Error("অবৈধ পরিমাণ");
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getCurrentUserId();
 
-      // Insert payment record
-      const { error: paymentError } = await supabase.from("due_payments").insert({
+      // 1) Insert payment locally — sync engine pushes when online.
+      await LocalDB.createLocal("due_payments", {
         sale_id: saleId,
         amount: collectAmount,
         payment_method: paymentMethod,
         notes: notes || null,
-        collected_by: user?.id,
+        collected_by: userId,
       });
-      if (paymentError) throw paymentError;
 
-      // Update sale due_amount and paid_amount
+      // 2) Update the sale row locally with new paid/due totals.
+      const sale = await LocalDB.getById<any>("sales", saleId);
       const newDue = currentDue - collectAmount;
-      const { data: sale } = await supabase.from("sales").select("paid_amount").eq("id", saleId).single();
       const newPaid = Number(sale?.paid_amount || 0) + collectAmount;
-
-      const { error: updateError } = await supabase
-        .from("sales")
-        .update({ due_amount: newDue, paid_amount: newPaid })
-        .eq("id", saleId);
-      if (updateError) throw updateError;
+      await LocalDB.updateLocal("sales", saleId, {
+        due_amount: newDue,
+        paid_amount: newPaid,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });

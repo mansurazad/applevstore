@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentUserId } from "@/lib/auth/offlineAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,10 +139,10 @@ export function Investments() {
   // ENTRY CRUD
   const addEntryMutation = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getCurrentUserId();
       await localDb.investmentEntries.create({
         sector_id: selectedSectorId, amount: Number(entryAmount), entry_type: entryType,
-        purpose: entryPurpose, notes: entryNotes, entry_date: entryDate, created_by: user?.id,
+        purpose: entryPurpose, notes: entryNotes, entry_date: entryDate, created_by: userId,
       });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-entries"] }); toast.success("এন্ট্রি যোগ হয়েছে"); resetEntryForm(); setShowAddEntry(false); },
@@ -169,10 +170,10 @@ export function Investments() {
   // INCOME CRUD
   const addIncomeMutation = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const userId = await getCurrentUserId();
       await localDb.investmentIncomes.create({
         sector_id: selectedSectorId, amount: Number(incomeAmount), source: incomeSource,
-        purpose: incomePurpose, notes: incomeNotes, income_date: incomeDate, created_by: user?.id,
+        purpose: incomePurpose, notes: incomeNotes, income_date: incomeDate, created_by: userId,
       });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["investment-incomes"] }); toast.success("আয় যোগ হয়েছে"); resetIncomeForm(); setShowAddIncome(false); },

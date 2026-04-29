@@ -93,6 +93,9 @@ export function Suppliers() {
 
   const receiveItemsMutation = useMutation({
     mutationFn: async ({ purchaseId, items }: { purchaseId: string; items: any[] }) => {
+      if (!navigator.onLine) {
+        throw new Error("ক্রয় গ্রহণের জন্য ইন্টারনেট সংযোগ প্রয়োজন");
+      }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 

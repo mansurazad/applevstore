@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { LocalDB } from "@/lib/localdb/adapter";
+import { useLiveQuery } from "@/hooks/useLiveQuery";
+import { useLocalDB } from "@/lib/localdb/LocalDBProvider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -29,45 +31,73 @@ export function CustomerDetails() {
   const { headerRef, hidden: headerHidden, headerHeight } = useAutoHideHeader();
   const [salesFilter, setSalesFilter] = useState<"all" | "due" | "paid">("all");
   const queryClient = useQueryClient();
+  const { ready } = useLocalDB();
 
-  const { data: customers } = useQuery({
-    queryKey: ["customers"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("customers").select("*").order("name");
-      if (error) throw error;
-      return data;
+  // Local-first reads — work fully offline, automatically refresh after sync.
+  const customers = useLiveQuery(
+    async () => {
+      const all = await LocalDB.listAll<any>("customers");
+      return all.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
     },
-  });
+    [ready]
+  );
 
-  const { data: customerSales } = useQuery({
-    queryKey: ["customer-sales", selectedCustomerId],
-    enabled: !!selectedCustomerId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("sales")
-        .select("*, sale_items(*, products(name, sku, imei, brand, model, condition, cost))")
-        .eq("customer_id", selectedCustomerId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+  const customerSales = useLiveQuery(
+    async () => {
+      if (!selectedCustomerId) return [];
+      const sales = await LocalDB.listWhere<any>(
+        "sales",
+        (r) => r.customer_id === selectedCustomerId
+      );
+      sales.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      // Hydrate sale_items + product info from local DB
+      const allItems = await LocalDB.listAll<any>("sale_items");
+      const products = await LocalDB.listAll<any>("products");
+      const productMap = new Map(products.map((p) => [p.id, p]));
+      return sales.map((s) => ({
+        ...s,
+        sale_items: allItems
+          .filter((it) => it.sale_id === s.id)
+          .map((it) => {
+            const p = productMap.get(it.product_id);
+            return {
+              ...it,
+              products: p
+                ? {
+                    name: p.name,
+                    sku: p.sku,
+                    imei: p.imei,
+                    brand: p.brand,
+                    model: p.model,
+                    condition: p.condition,
+                    cost: p.cost,
+                  }
+                : null,
+            };
+          }),
+      }));
     },
-  });
+    [ready, selectedCustomerId]
+  );
 
-  const { data: duePayments } = useQuery({
-    queryKey: ["customer-due-payments", selectedCustomerId],
-    enabled: !!selectedCustomerId && !!customerSales?.length,
-    queryFn: async () => {
+  const duePayments = useLiveQuery(
+    async () => {
       if (!customerSales?.length) return [];
-      const saleIds = customerSales.map(s => s.id);
-      const { data, error } = await supabase
-        .from("due_payments")
-        .select("*")
-        .in("sale_id", saleIds)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+      const saleIds = new Set(customerSales.map((s: any) => s.id));
+      const all = await LocalDB.listWhere<any>(
+        "due_payments",
+        (r) => saleIds.has(r.sale_id)
+      );
+      return all.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     },
-  });
+    [ready, customerSales]
+  );
 
   const selectedCustomer = useMemo(() => {
     return customers?.find(c => c.id === selectedCustomerId) || null;
