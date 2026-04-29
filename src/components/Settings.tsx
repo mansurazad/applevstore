@@ -1437,6 +1437,23 @@ export function Settings() {
           )}
           <DialogFooter>
             <Button onClick={() => setRestoreResult(null)}>বন্ধ করুন</Button>
+            {restoreResult &&
+              restoreResult.perTable.some(
+                (r) => (r.failedRows?.length ?? 0) > 0,
+              ) && (
+                <Button
+                  variant="secondary"
+                  onClick={retryFailedRows}
+                  disabled={isRetrying}
+                >
+                  {isRetrying
+                    ? "⏳ Retrying..."
+                    : `🔁 ব্যর্থ রেকর্ড পুনরায় চেষ্টা (${restoreResult.perTable.reduce(
+                        (s, r) => s + (r.failedRows?.length ?? 0),
+                        0,
+                      )})`}
+                </Button>
+              )}
             <Button
               variant="outline"
               onClick={() => {
@@ -1446,6 +1463,79 @@ export function Settings() {
             >
               পেইজ রিফ্রেশ করুন
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Validation report dialog ---------- */}
+      <Dialog open={showValidation} onOpenChange={setShowValidation}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>🔍 অপূর্ণ রেকর্ড রিপোর্ট</DialogTitle>
+            <DialogDescription>
+              যেসব রেকর্ডে আবশ্যক ফিল্ড অনুপস্থিত (যেমন product id / IMEI),
+              টেবিল অনুযায়ী নিচে দেখানো হলো।
+            </DialogDescription>
+          </DialogHeader>
+          {restorePreview && (
+            <ScrollArea className="h-[60vh] rounded-md border p-3">
+              <div className="space-y-4 text-sm">
+                {restorePreview.validation
+                  .filter((v) => v.incomplete.length > 0)
+                  .map((v) => (
+                    <div key={v.table}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium capitalize">
+                          {v.table.replace("_", " ")}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Badge variant="default">{v.complete} সম্পূর্ণ</Badge>
+                          <Badge variant="destructive">
+                            {v.incomplete.length} অপূর্ণ
+                          </Badge>
+                        </span>
+                      </div>
+                      <ul className="space-y-1 pl-3 border-l border-border">
+                        {v.incomplete.slice(0, 50).map((row) => (
+                          <li
+                            key={`${v.table}-${row.index}`}
+                            className="text-[12px]"
+                          >
+                            <span className="text-muted-foreground">
+                              #{row.index + 1}
+                            </span>{" "}
+                            <span className="font-mono">
+                              {row.id ?? "(no id)"}
+                            </span>
+                            {row.name && (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                — {row.name}
+                              </span>
+                            )}
+                            <span className="ml-2 text-destructive">
+                              missing: {row.missing.join(", ")}
+                            </span>
+                          </li>
+                        ))}
+                        {v.incomplete.length > 50 && (
+                          <li className="text-[11px] text-muted-foreground">
+                            … আরো {v.incomplete.length - 50} টি রেকর্ড
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  ))}
+                {restorePreview.incompleteTotal === 0 && (
+                  <p className="text-emerald-600">
+                    ✓ সব রেকর্ডে আবশ্যক ফিল্ড উপস্থিত আছে।
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setShowValidation(false)}>বন্ধ করুন</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
