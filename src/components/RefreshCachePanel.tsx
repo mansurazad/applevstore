@@ -3,16 +3,55 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Database, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, Database, Wifi, WifiOff, FileText } from "lucide-react";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { supabase } from "@/integrations/supabase/client";
-import { pullAll } from "@/lib/sync/pull";
+import { pullAllDetailed, type PullDetail } from "@/lib/sync/pull";
 import { cacheReplace } from "@/hooks/useOfflineQuery";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { bn } from "date-fns/locale";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const STAMP_KEY = "applestore.lastCacheRefresh.v1";
+
+/** Bengali display names for sync tables shown in the result summary. */
+const TABLE_LABELS: Record<string, string> = {
+  categories: "ক্যাটাগরি",
+  suppliers: "সরবরাহকারী",
+  customers: "গ্রাহক",
+  products: "পণ্য",
+  investment_sectors: "বিনিয়োগ সেক্টর",
+  shop_settings: "শপ সেটিংস",
+  sales: "বিক্রয়",
+  sale_items: "বিক্রয় আইটেম",
+  due_payments: "বাকি পরিশোধ",
+  returns: "রিটার্ন",
+  investment_entries: "বিনিয়োগ এন্ট্রি",
+  investment_incomes: "বিনিয়োগ আয়",
+  activity_logs: "এক্টিভিটি লগ",
+};
+
+type ExtraSummary = {
+  profiles: number;
+  user_roles: number;
+  role_permissions: number;
+};
 
 /**
  * Manual "Refresh cache" control. Triggers an immediate offline cache
@@ -33,6 +72,11 @@ export function RefreshCachePanel() {
       return null;
     }
   });
+  const [resultOpen, setResultOpen] = useState(false);
+  const [pullResult, setPullResult] = useState<PullDetail | null>(null);
+  const [extraResult, setExtraResult] = useState<ExtraSummary | null>(null);
+  const [resultStartedAt, setResultStartedAt] = useState<string | null>(null);
+  const [resultDurationMs, setResultDurationMs] = useState<number>(0);
 
   const handleRefresh = async () => {
     if (!online) {
@@ -40,9 +84,10 @@ export function RefreshCachePanel() {
       return;
     }
     setBusy(true);
+    const startedAt = Date.now();
     try {
       // 1. Pull all two-way synced tables
-      const pulled = await pullAll();
+      const detail = await pullAllDetailed();
 
       // 2. Refresh read-only mirrors used by Settings
       const [profilesRes, rolesRes, permsRes] = await Promise.all([
@@ -81,8 +126,20 @@ export function RefreshCachePanel() {
         /* ignore */
       }
       setLastRefresh(stamp);
+
+      // Stash detailed summary and open result dialog
+      setPullResult(detail);
+      setExtraResult({
+        profiles: profilesRes.data?.length ?? 0,
+        user_roles: rolesRes.data?.length ?? 0,
+        role_permissions: permsRes.data?.length ?? 0,
+      });
+      setResultStartedAt(stamp);
+      setResultDurationMs(Date.now() - startedAt);
+      setResultOpen(true);
+
       toast.success(
-        `অফলাইন ক্যাশ রিফ্রেশ সম্পন্ন: ${pulled} সিঙ্ক রেকর্ড + ব্যবহারকারী/পারমিশন তথ্য`
+        `অফলাইন ক্যাশ রিফ্রেশ সম্পন্ন: ${detail.total} সিঙ্ক রেকর্ড + ব্যবহারকারী/পারমিশন তথ্য`
       );
     } catch (e: any) {
       toast.error("ক্যাশ রিফ্রেশ ব্যর্থ: " + (e?.message ?? String(e)));
@@ -121,6 +178,17 @@ export function RefreshCachePanel() {
           <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
           ক্যাশ রিফ্রেশ করুন
         </Button>
+        {pullResult && !busy && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            onClick={() => setResultOpen(true)}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            সর্বশেষ ফলাফল দেখুন
+          </Button>
+        )}
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground">সর্বশেষ রিফ্রেশ:</span>{" "}
           {lastRefresh
@@ -128,6 +196,145 @@ export function RefreshCachePanel() {
             : "এখনো হয়নি"}
         </p>
       </div>
+
+      <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>ক্যাশ রিফ্রেশের বিস্তারিত ফলাফল</DialogTitle>
+            <DialogDescription>
+              {resultStartedAt &&
+                `সময়: ${format(new Date(resultStartedAt), "PPpp", {
+                  locale: bn,
+                })} · ${(resultDurationMs / 1000).toFixed(2)} সেকেন্ড`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {pullResult && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-lg bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">মোট সিঙ্ক রেকর্ড</p>
+                  <p className="text-2xl font-bold text-primary">{pullResult.total}</p>
+                </div>
+                <div className="rounded-lg bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">টেবিল আপডেট</p>
+                  <p className="text-2xl font-bold text-primary">
+                    {pullResult.perTable.filter((t) => t.rows > 0).length}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">ব্যর্থ টেবিল</p>
+                  <p className="text-2xl font-bold text-destructive">
+                    {pullResult.perTable.filter((t) => t.error).length}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">সময়</p>
+                  <p className="text-2xl font-bold text-primary">
+                    {(resultDurationMs / 1000).toFixed(1)}s
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border max-h-80 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>টেবিল</TableHead>
+                      <TableHead className="text-right">আপডেটেড রেকর্ড</TableHead>
+                      <TableHead>স্ট্যাটাস</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pullResult.perTable.map((t) => (
+                      <TableRow key={t.table}>
+                        <TableCell className="font-medium">
+                          {TABLE_LABELS[t.table] ?? t.table}
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            ({t.table})
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {t.rows}
+                        </TableCell>
+                        <TableCell>
+                          {t.error ? (
+                            <Badge variant="destructive" className="text-xs">
+                              ত্রুটি: {t.error}
+                            </Badge>
+                          ) : t.rows > 0 ? (
+                            <Badge className="text-xs">আপডেটেড</Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              পরিবর্তন নেই
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {extraResult && (
+                      <>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            ব্যবহারকারী প্রোফাইল
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              (profiles)
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {extraResult.profiles}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              মিরর রিফ্রেশড
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            ব্যবহারকারী রোল
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              (user_roles)
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {extraResult.user_roles}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              মিরর রিফ্রেশড
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium">
+                            রোল পারমিশন
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              (role_permissions)
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {extraResult.role_permissions}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              মিরর রিফ্রেশড
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button onClick={() => setResultOpen(false)}>বন্ধ করুন</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
