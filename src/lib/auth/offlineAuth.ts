@@ -140,8 +140,8 @@ export async function rememberOnlineLogin(
   store[key(email)] = {
     email: email.trim(),
     user_id: userId,
-    salt_b64: bufToB64(salt.buffer),
-    hash_b64: bufToB64(hash.buffer),
+    salt_b64: bufToB64(salt.buffer as ArrayBuffer),
+    hash_b64: bufToB64(hash.buffer as ArrayBuffer),
     session: session ?? null,
     saved_at: Date.now(),
   };
