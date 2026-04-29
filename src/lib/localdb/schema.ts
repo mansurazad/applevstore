@@ -220,3 +220,47 @@ export type SyncConflict = {
   resolved?: 0 | 1;          // 1 once user picked a side
   resolution?: "local" | "remote" | null;
 };
+
+/**
+ * Read-only mirrors of server-managed tables that we want available offline
+ * inside the Settings page (User Management, Activity Log, Permissions).
+ * These are refreshed opportunistically while online and read from cache
+ * when offline. They never participate in two-way sync.
+ */
+export type LocalProfile = {
+  id: string;
+  email?: string | null;
+  full_name?: string | null;
+  avatar_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  _cachedAt?: string;
+};
+
+export type LocalUserRole = {
+  id: string;          // user_id used as PK for easy upsert
+  user_id: string;
+  role: string;
+  created_at?: string;
+  updated_at?: string;
+  _cachedAt?: string;
+};
+
+export type LocalRolePermission = {
+  id: string;          // role used as PK for easy upsert
+  role: string;
+  can_access_dashboard: boolean;
+  can_access_pos: boolean;
+  can_access_sales: boolean;
+  can_access_reports: boolean;
+  can_access_settings: boolean;
+  can_manage_products: boolean;
+  can_manage_customers: boolean;
+  can_manage_suppliers: boolean;
+  can_manage_categories: boolean;
+  can_access_returns: boolean;
+  can_access_user_management: boolean;
+  can_backup_restore: boolean;
+  can_reset_data: boolean;
+  _cachedAt?: string;
+};

@@ -5,6 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { useOfflineQuery } from "@/hooks/useOfflineQuery";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { LocalDB } from "@/lib/localdb/adapter";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { CalendarIcon } from "lucide-react";
@@ -36,6 +40,7 @@ export function Settings() {
   const navigate = useNavigate();
   const { settings, logoSrc } = useShopSettings();
   const { isAdmin } = useUserRole();
+  const isOnline = useOnlineStatus();
   // Branding settings now directly visible for admin users
 
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -66,10 +71,10 @@ export function Settings() {
   const [profitDateTo, setProfitDateTo] = useState<Date | undefined>(undefined);
   const [activePeriod, setActivePeriod] = useState<string>("all");
 
-  // Get database stats (counts only)
-  const { data: stats } = useQuery({
-    queryKey: ["database-stats"],
-    queryFn: async () => {
+  // Get database stats (counts only) – offline-aware
+  const { data: stats } = useOfflineQuery(
+    ["database-stats"],
+    async () => {
       const [products, categories, customers, suppliers, sales, purchases, saleItems, purchaseItems, returns] = await Promise.all([
         supabase.from("products").select("*", { count: "exact", head: true }),
         supabase.from("categories").select("*", { count: "exact", head: true }),
@@ -81,7 +86,6 @@ export function Settings() {
         supabase.from("purchase_items").select("*", { count: "exact", head: true }),
         supabase.from("returns").select("*", { count: "exact", head: true }),
       ]);
-
       return {
         products: products.count || 0,
         categories: categories.count || 0,
@@ -94,48 +98,76 @@ export function Settings() {
         returns: returns.count || 0,
       };
     },
-  });
+    async () => {
+      const [products, categories, customers, suppliers, sales, saleItems, returns] = await Promise.all([
+        LocalDB.listAll("products"),
+        LocalDB.listAll("categories"),
+        LocalDB.listAll("customers"),
+        LocalDB.listAll("suppliers"),
+        LocalDB.listAll("sales"),
+        LocalDB.listAll("sale_items"),
+        LocalDB.listAll("returns"),
+      ]);
+      return {
+        products: products.length,
+        categories: categories.length,
+        customers: customers.length,
+        suppliers: suppliers.length,
+        sales: sales.length,
+        purchases: 0,
+        saleItems: saleItems.length,
+        purchaseItems: 0,
+        returns: returns.length,
+      };
+    }
+  );
 
-  // Get profit stats with date filtering
-  const { data: profitStats } = useQuery({
-    queryKey: ["profit-stats", profitDateFrom?.toISOString(), profitDateTo?.toISOString()],
-    queryFn: async () => {
+  // Get profit stats with date filtering – offline-aware
+  const { data: profitStats } = useOfflineQuery(
+    ["profit-stats", profitDateFrom?.toISOString(), profitDateTo?.toISOString()],
+    async () => {
       let query = supabase.from("sale_items").select("unit_price, quantity, created_at, products(cost, condition)");
-      
-      if (profitDateFrom) {
-        query = query.gte("created_at", startOfDay(profitDateFrom).toISOString());
-      }
-      if (profitDateTo) {
-        query = query.lte("created_at", endOfDay(profitDateTo).toISOString());
-      }
-      
+      if (profitDateFrom) query = query.gte("created_at", startOfDay(profitDateFrom).toISOString());
+      if (profitDateTo) query = query.lte("created_at", endOfDay(profitDateTo).toISOString());
       const { data } = await query;
-
       let newMobileProfit = 0;
       let usedMobileProfit = 0;
-
       data?.forEach((item: any) => {
         const salePrice = Number(item.unit_price || 0);
         const costPrice = Number(item.products?.cost || 0);
         const quantity = Number(item.quantity || 1);
         const profit = (salePrice - costPrice) * quantity;
-        // Use product condition instead of sale_items condition
         const productCondition = item.products?.condition || 'new';
-
-        if (productCondition === 'new') {
-          newMobileProfit += profit;
-        } else {
-          usedMobileProfit += profit;
-        }
+        if (productCondition === 'new') newMobileProfit += profit;
+        else usedMobileProfit += profit;
       });
-
-      return {
-        newMobileProfit,
-        usedMobileProfit,
-        totalProfit: newMobileProfit + usedMobileProfit,
-      };
+      return { newMobileProfit, usedMobileProfit, totalProfit: newMobileProfit + usedMobileProfit };
     },
-  });
+    async () => {
+      const [items, products] = await Promise.all([
+        LocalDB.listAll<any>("sale_items"),
+        LocalDB.listAll<any>("products"),
+      ]);
+      const productMap = new Map(products.map((p: any) => [p.id, p]));
+      const fromMs = profitDateFrom ? startOfDay(profitDateFrom).getTime() : -Infinity;
+      const toMs = profitDateTo ? endOfDay(profitDateTo).getTime() : Infinity;
+      let newMobileProfit = 0;
+      let usedMobileProfit = 0;
+      items.forEach((item: any) => {
+        const ts = item.created_at ? new Date(item.created_at).getTime() : 0;
+        if (ts < fromMs || ts > toMs) return;
+        const product: any = productMap.get(item.product_id);
+        const salePrice = Number(item.unit_price || 0);
+        const costPrice = Number(product?.cost || 0);
+        const quantity = Number(item.quantity || 1);
+        const profit = (salePrice - costPrice) * quantity;
+        const productCondition = product?.condition || 'new';
+        if (productCondition === 'new') newMobileProfit += profit;
+        else usedMobileProfit += profit;
+      });
+      return { newMobileProfit, usedMobileProfit, totalProfit: newMobileProfit + usedMobileProfit };
+    }
+  );
 
   const setPeriod = (period: string) => {
     setActivePeriod(period);
@@ -492,6 +524,8 @@ export function Settings() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto pb-6 space-y-6">
+        <OfflineBanner message="অফলাইন মোডে আছেন — পরিসংখ্যান ক্যাশ থেকে দেখানো হচ্ছে। ব্যাকআপ, রিস্টোর, রিসেট এবং ব্যাকএন্ড সিঙ্ক অনলাইনে ফিরলে চালু হবে।" />
+
         {/* Cloud sync controls */}
         <SyncSettingsPanel />
 
@@ -661,7 +695,8 @@ export function Settings() {
             </p>
             <Button
               onClick={handleBackup}
-              disabled={isBackingUp}
+              disabled={isBackingUp || !isOnline}
+              title={!isOnline ? "ব্যাকআপের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto"
             >
               {isBackingUp ? "⏳ Creating Backup..." : "📥 Download Backup"}
@@ -684,7 +719,8 @@ export function Settings() {
               />
               <Button
                 onClick={() => document.getElementById("restore-file")?.click()}
-                disabled={isRestoring}
+                disabled={isRestoring || !isOnline}
+                title={!isOnline ? "রিস্টোরের জন্য ইন্টারনেট প্রয়োজন" : undefined}
                 variant="outline"
                 className="w-full md:w-auto"
               >
@@ -717,9 +753,10 @@ export function Settings() {
             </p>
             <Button 
               variant="outline" 
-              disabled={isClearingSales} 
+              disabled={isClearingSales || !isOnline} 
+              title={!isOnline ? "ডেটা পরিবর্তনের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
-              onClick={fetchSalesStats}
+              onClick={() => { if (!isOnline) { toast.error("অফলাইনে এই কাজটি করা যাবে না"); return; } fetchSalesStats(); }}
             >
               {isClearingSales ? "⏳ Clearing..." : "🧹 Clear Sales Data"}
             </Button>
@@ -789,9 +826,10 @@ export function Settings() {
             </p>
             <Button 
               variant="destructive" 
-              disabled={isResetting} 
+              disabled={isResetting || !isOnline} 
+              title={!isOnline ? "ডেটা পরিবর্তনের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto"
-              onClick={fetchResetStats}
+              onClick={() => { if (!isOnline) { toast.error("অফলাইনে এই কাজটি করা যাবে না"); return; } fetchResetStats(); }}
             >
               {isResetting ? "⏳ Resetting..." : "🗑️ Reset All Data"}
             </Button>

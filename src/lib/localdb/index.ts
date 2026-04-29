@@ -16,6 +16,9 @@ import type {
   SyncState,
   SyncError,
   SyncConflict,
+  LocalProfile,
+  LocalUserRole,
+  LocalRolePermission,
 } from "./schema";
 
 /**
@@ -42,6 +45,9 @@ export class AppleStoreLocalDB extends Dexie {
   sync_state!: Table<SyncState, string>;
   sync_errors!: Table<SyncError, string>;
   sync_conflicts!: Table<SyncConflict, string>;
+  profiles_cache!: Table<LocalProfile, string>;
+  user_roles_cache!: Table<LocalUserRole, string>;
+  role_permissions_cache!: Table<LocalRolePermission, string>;
 
   constructor(dbName: string) {
     super(dbName);
@@ -72,6 +78,12 @@ export class AppleStoreLocalDB extends Dexie {
 
     this.version(3).stores({
       sync_conflicts: "id, table, row_id, resolved, detected_at",
+    });
+
+    this.version(4).stores({
+      profiles_cache: "id, email, _cachedAt",
+      user_roles_cache: "id, user_id, role, _cachedAt",
+      role_permissions_cache: "id, role, _cachedAt",
     });
   }
 }

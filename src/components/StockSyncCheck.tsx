@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useOfflineQuery } from "@/hooks/useOfflineQuery";
+import { LocalDB } from "@/lib/localdb/adapter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,32 +42,37 @@ export function StockSyncCheck() {
   const [discrepancies, setDiscrepancies] = useState<StockDiscrepancy[]>([]);
   const [hasChecked, setHasChecked] = useState(false);
 
-  // Fetch products
-  const { data: products } = useQuery({
-    queryKey: ["products"],
-    queryFn: async () => {
+  // Fetch products – offline-aware
+  const { data: products } = useOfflineQuery<any[]>(
+    ["products"],
+    async () => {
       const { data, error } = await supabase.from("products").select("*");
       if (error) throw error;
       return data || [];
     },
-  });
+    async () => LocalDB.listAll("products")
+  );
 
-  // Fetch sale items
-  const { data: saleItems } = useQuery({
-    queryKey: ["sale_items_for_sync"],
-    queryFn: async () => {
+  // Fetch sale items – offline-aware
+  const { data: saleItems } = useOfflineQuery<any[]>(
+    ["sale_items_for_sync"],
+    async () => {
       const { data, error } = await supabase
         .from("sale_items")
         .select("product_id, quantity");
       if (error) throw error;
       return data || [];
     },
-  });
+    async () => {
+      const items = await LocalDB.listAll<any>("sale_items");
+      return items.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
+    }
+  );
 
-  // Fetch returns
-  const { data: returns } = useQuery({
-    queryKey: ["returns_for_sync"],
-    queryFn: async () => {
+  // Fetch returns – offline-aware
+  const { data: returns } = useOfflineQuery<any[]>(
+    ["returns_for_sync"],
+    async () => {
       const { data, error } = await supabase
         .from("returns")
         .select("product_id, quantity, status")
@@ -73,7 +80,13 @@ export function StockSyncCheck() {
       if (error) throw error;
       return data || [];
     },
-  });
+    async () => {
+      const rows = await LocalDB.listAll<any>("returns");
+      return rows
+        .filter((r) => r.status === "completed")
+        .map((r) => ({ product_id: r.product_id, quantity: r.quantity, status: r.status }));
+    }
+  );
 
   const runStockCheck = () => {
     if (!products) {
