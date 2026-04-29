@@ -48,6 +48,15 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import {
+  checkBackupSchema,
+  validateBackupRows,
+  totalIncomplete,
+  describeVersion,
+  type SchemaCheck,
+  type TableValidation,
+} from "@/lib/backup/restoreValidation";
+import { OfflineCoverageTest } from "@/components/OfflineCoverageTest";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -75,11 +84,23 @@ export function Settings() {
     version?: string;
     timestamp?: string;
     missingTables: string[];
+    schemaCheck: SchemaCheck;
+    validation: TableValidation[];
+    incompleteTotal: number;
   } | null>(null);
   const [restoreResult, setRestoreResult] = useState<{
-    perTable: { table: string; tried: number; ok: number; failed: number; error?: string }[];
+    perTable: {
+      table: string;
+      tried: number;
+      ok: number;
+      failed: number;
+      error?: string;
+      failedRows?: any[];
+    }[];
     durationMs: number;
   } | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
   const [resetStats, setResetStats] = useState<{
     sales: number;
