@@ -992,6 +992,9 @@ export function Settings() {
         </div>
       </Card>
 
+      {/* Offline Coverage Test */}
+      <OfflineCoverageTest />
+
       {/* Desktop App Build */}
       <Card className="p-6">
         <h2 className="text-xl font-semibold mb-2 text-foreground">🖥️ ডেস্কটপ অ্যাপ</h2>
