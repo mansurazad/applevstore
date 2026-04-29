@@ -358,6 +358,7 @@ export function UserManagement() {
   return (
     <Card className="p-6">
       <Tabs defaultValue="users">
+        <OfflineBanner message="অফলাইনে ব্যবহারকারী তালিকা ক্যাশ থেকে দেখানো হচ্ছে — যোগ/সম্পাদনা/মুছে ফেলা অনলাইনে ফিরলে চালু হবে।" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
             <Users className="w-6 h-6 text-primary" />
@@ -409,6 +410,8 @@ export function UserManagement() {
             />
             <Button 
               onClick={() => setShowAddDialog(true)}
+              disabled={!isOnline}
+              title={!isOnline ? "অফলাইনে যুক্ত করা যাবে না" : undefined}
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90"
             >
               <UserPlus className="w-4 h-4 mr-2" />
