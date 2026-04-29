@@ -43,6 +43,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useUserRole, AppRole } from "@/hooks/useUserRole";
 import { Shield, UserPlus, Trash2, Edit, Users, Crown, UserCog, User, Mail, Lock, KeyRound, Settings2 } from "lucide-react";
+import { useOfflineQuery, cacheReplace, readLocalTable } from "@/hooks/useOfflineQuery";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 interface UserWithRole {
   id: string;
@@ -92,6 +95,7 @@ const permissionKeys = Object.keys(permissionLabels);
 export function UserManagement() {
   const { isAdmin, userId: currentUserId, loading: roleLoading } = useUserRole();
   const queryClient = useQueryClient();
+  const isOnline = useOnlineStatus();
   
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -109,21 +113,19 @@ export function UserManagement() {
   const [newUserRole, setNewUserRole] = useState<AppRole>('staff');
   const [addingUser, setAddingUser] = useState(false);
 
-  // Fetch users
-  const { data: users, isLoading } = useQuery({
-    queryKey: ['users-with-roles'],
-    queryFn: async () => {
+  // Fetch users (offline-aware via local cache mirror)
+  const { data: users, isLoading } = useOfflineQuery<UserWithRole[]>(
+    ['users-with-roles'],
+    async () => {
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, email, full_name, created_at');
       if (profilesError) throw profilesError;
-
       const { data: roles, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id, role');
       if (rolesError) throw rolesError;
-
-      return (profiles || []).map((profile) => {
+      const merged = (profiles || []).map((profile) => {
         const userRole = roles?.find(r => r.user_id === profile.id);
         return {
           id: profile.id,
@@ -134,22 +136,52 @@ export function UserManagement() {
           created_at: profile.created_at,
         };
       }) as UserWithRole[];
+      // Cache for offline reads
+      await cacheReplace('profiles_cache', (profiles || []).map((p: any) => ({ ...p })));
+      await cacheReplace(
+        'user_roles_cache',
+        (roles || []).map((r: any) => ({ id: r.user_id, user_id: r.user_id, role: r.role }))
+      );
+      return merged;
     },
-    enabled: isAdmin,
-  });
+    async () => {
+      const [profiles, roles] = await Promise.all([
+        readLocalTable<any>('profiles_cache'),
+        readLocalTable<any>('user_roles_cache'),
+      ]);
+      return profiles.map((profile) => {
+        const userRole = roles.find((r: any) => r.user_id === profile.id);
+        return {
+          id: profile.id,
+          email: profile.email || '',
+          full_name: profile.full_name,
+          role: (userRole?.role as AppRole) || 'staff',
+          user_id: profile.id,
+          created_at: profile.created_at,
+        };
+      }) as UserWithRole[];
+    },
+    undefined,
+    { enabled: isAdmin }
+  );
 
-  // Fetch role permissions
-  const { data: rolePermissions, isLoading: permLoading } = useQuery({
-    queryKey: ['role-permissions'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('role_permissions')
-        .select('*');
+  // Fetch role permissions (offline-aware)
+  const { data: rolePermissions, isLoading: permLoading } = useOfflineQuery<PermissionRow[]>(
+    ['role-permissions'],
+    async () => {
+      const { data, error } = await supabase.from('role_permissions').select('*');
       if (error) throw error;
-      return data as PermissionRow[];
+      const rows = (data || []) as PermissionRow[];
+      await cacheReplace('role_permissions_cache', rows.map((r: any) => ({ ...r, id: r.role })));
+      return rows;
     },
-    enabled: isAdmin,
-  });
+    async () => {
+      const rows = await readLocalTable<any>('role_permissions_cache');
+      return rows as PermissionRow[];
+    },
+    undefined,
+    { enabled: isAdmin }
+  );
 
   const filteredUsers = users?.filter(user => 
     user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -159,6 +191,10 @@ export function UserManagement() {
   const handleTogglePermission = async (role: AppRole, key: string, value: boolean) => {
     if (role === 'admin') {
       toast.error("এডমিনের পারমিশন পরিবর্তন করা যাবে না");
+      return;
+    }
+    if (!isOnline) {
+      toast.error("অফলাইনে পারমিশন পরিবর্তন করা যাবে না");
       return;
     }
     setSavingPermissions(true);
@@ -178,6 +214,7 @@ export function UserManagement() {
   };
 
   const handleAddUser = async () => {
+    if (!isOnline) { toast.error("অফলাইনে নতুন ব্যবহারকারী যুক্ত করা যাবে না"); return; }
     if (!newUserEmail || !newUserPassword) {
       toast.error("ইমেইল ও পাসওয়ার্ড দিতে হবে");
       return;
@@ -223,6 +260,7 @@ export function UserManagement() {
 
   const handleUpdateRole = async () => {
     if (!selectedUser) return;
+    if (!isOnline) { toast.error("অফলাইনে রোল পরিবর্তন করা যাবে না"); return; }
     try {
       const { data: existingRole } = await supabase
         .from('user_roles').select('id').eq('user_id', selectedUser.user_id).maybeSingle();
@@ -244,6 +282,7 @@ export function UserManagement() {
 
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
+    if (!isOnline) { toast.error("অফলাইনে ব্যবহারকারী সরানো যাবে না"); return; }
     try {
       await supabase.from('user_roles').delete().eq('user_id', selectedUser.user_id);
       await supabase.from('profiles').delete().eq('id', selectedUser.user_id);
@@ -258,6 +297,7 @@ export function UserManagement() {
 
   const handleResetPassword = async () => {
     if (!selectedUser?.email) return;
+    if (!isOnline) { toast.error("অফলাইনে পাসওয়ার্ড রিসেট ইমেইল পাঠানো যাবে না"); return; }
     setResetPasswordLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(selectedUser.email, {
