@@ -395,11 +395,12 @@ export function Settings() {
   const upsertBatch = async (
     table: string,
     rows: any[],
-  ): Promise<{ ok: number; failed: number; error?: string }> => {
+  ): Promise<{ ok: number; failed: number; error?: string; failedRows: any[] }> => {
     const BATCH = 200;
     let ok = 0;
     let failed = 0;
     let firstError: string | undefined;
+    const failedRows: any[] = [];
     for (let i = 0; i < rows.length; i += BATCH) {
       const slice = rows.slice(i, i + BATCH);
       const { error } = await (supabase.from as any)(table)
@@ -411,6 +412,7 @@ export function Settings() {
             .upsert(row, { onConflict: "id" });
           if (e2) {
             failed++;
+            failedRows.push(row);
             if (!firstError) firstError = e2.message;
           } else {
             ok++;
@@ -420,7 +422,7 @@ export function Settings() {
         ok += slice.length;
       }
     }
-    return { ok, failed, error: firstError };
+    return { ok, failed, error: firstError, failedRows };
   };
 
   /**
