@@ -48,6 +48,15 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import {
+  checkBackupSchema,
+  validateBackupRows,
+  totalIncomplete,
+  describeVersion,
+  type SchemaCheck,
+  type TableValidation,
+} from "@/lib/backup/restoreValidation";
+import { OfflineCoverageTest } from "@/components/OfflineCoverageTest";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -75,11 +84,23 @@ export function Settings() {
     version?: string;
     timestamp?: string;
     missingTables: string[];
+    schemaCheck: SchemaCheck;
+    validation: TableValidation[];
+    incompleteTotal: number;
   } | null>(null);
   const [restoreResult, setRestoreResult] = useState<{
-    perTable: { table: string; tried: number; ok: number; failed: number; error?: string }[];
+    perTable: {
+      table: string;
+      tried: number;
+      ok: number;
+      failed: number;
+      error?: string;
+      failedRows?: any[];
+    }[];
     durationMs: number;
   } | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
   const [resetStats, setResetStats] = useState<{
     sales: number;
@@ -345,6 +366,9 @@ export function Settings() {
         counts.push({ table: t, count: arr.length });
         total += arr.length;
       }
+      const schemaCheck = checkBackupSchema(backup);
+      const validation = validateBackupRows(backup);
+      const incompleteTotal = totalIncomplete(validation);
       setRestorePreview({
         fileName: file.name,
         counts,
@@ -353,6 +377,9 @@ export function Settings() {
         version: backup.version,
         timestamp: backup.timestamp,
         missingTables: missing,
+        schemaCheck,
+        validation,
+        incompleteTotal,
       });
     } catch (e: any) {
       toast.error("Restore প্রিভিউ ব্যর্থ: " + e.message);
@@ -368,11 +395,12 @@ export function Settings() {
   const upsertBatch = async (
     table: string,
     rows: any[],
-  ): Promise<{ ok: number; failed: number; error?: string }> => {
+  ): Promise<{ ok: number; failed: number; error?: string; failedRows: any[] }> => {
     const BATCH = 200;
     let ok = 0;
     let failed = 0;
     let firstError: string | undefined;
+    const failedRows: any[] = [];
     for (let i = 0; i < rows.length; i += BATCH) {
       const slice = rows.slice(i, i + BATCH);
       const { error } = await (supabase.from as any)(table)
@@ -384,6 +412,7 @@ export function Settings() {
             .upsert(row, { onConflict: "id" });
           if (e2) {
             failed++;
+            failedRows.push(row);
             if (!firstError) firstError = e2.message;
           } else {
             ok++;
@@ -393,7 +422,7 @@ export function Settings() {
         ok += slice.length;
       }
     }
-    return { ok, failed, error: firstError };
+    return { ok, failed, error: firstError, failedRows };
   };
 
   /**
@@ -412,6 +441,7 @@ export function Settings() {
       ok: number;
       failed: number;
       error?: string;
+      failedRows?: any[];
     }[] = [];
     try {
       toast.info("Restore শুরু হয়েছে — অপেক্ষা করুন…");
@@ -428,6 +458,7 @@ export function Settings() {
           ok: res.ok,
           failed: res.failed,
           error: res.error,
+          failedRows: res.failedRows,
         });
       }
 
@@ -448,6 +479,55 @@ export function Settings() {
       setRestoreResult({ perTable, durationMs: Date.now() - startedAt });
     } finally {
       setIsRestoring(false);
+    }
+  };
+
+  /**
+   * Re-attempt only the rows that failed during the previous restore.
+   * Updates `restoreResult` in place so the user can keep retrying until
+   * everything succeeds, without re-uploading the full backup file.
+   */
+  const retryFailedRows = async () => {
+    if (!restoreResult) return;
+    const failingTables = restoreResult.perTable.filter(
+      (r) => r.failedRows && r.failedRows.length > 0,
+    );
+    if (!failingTables.length) {
+      toast.info("Retry করার মতো ব্যর্থ রেকর্ড নেই");
+      return;
+    }
+    setIsRetrying(true);
+    const startedAt = Date.now();
+    try {
+      toast.info("ব্যর্থ রেকর্ডগুলো পুনরায় চেষ্টা হচ্ছে…");
+      const next = restoreResult.perTable.map((r) => ({ ...r }));
+      let recovered = 0;
+      let stillFailed = 0;
+      for (const entry of next) {
+        if (!entry.failedRows || entry.failedRows.length === 0) continue;
+        const res = await upsertBatch(entry.table, entry.failedRows);
+        entry.ok += res.ok;
+        entry.failed = res.failed;
+        entry.failedRows = res.failedRows;
+        entry.error = res.error;
+        recovered += res.ok;
+        stillFailed += res.failed;
+      }
+      setRestoreResult({
+        perTable: next,
+        durationMs: (restoreResult.durationMs ?? 0) + (Date.now() - startedAt),
+      });
+      if (stillFailed === 0) {
+        toast.success(`সব ${recovered} টি রেকর্ড পুনরুদ্ধার হয়েছে ✓`);
+      } else {
+        toast.warning(
+          `${recovered} সফল · ${stillFailed} এখনো ব্যর্থ — আবার চেষ্টা করতে পারো`,
+        );
+      }
+    } catch (e: any) {
+      toast.error("Retry ব্যর্থ: " + e.message);
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -912,6 +992,9 @@ export function Settings() {
         </div>
       </Card>
 
+      {/* Offline Coverage Test */}
+      <OfflineCoverageTest />
+
       {/* Desktop App Build */}
       <Card className="p-6">
         <h2 className="text-xl font-semibold mb-2 text-foreground">🖥️ ডেস্কটপ অ্যাপ</h2>
@@ -1220,7 +1303,26 @@ export function Settings() {
                     {restorePreview.total}
                   </span>
                 </div>
+                <div>
+                  স্কিমা: {describeVersion(restorePreview.schemaCheck)}
+                </div>
               </div>
+
+              {/* Schema check warnings */}
+              {(restorePreview.schemaCheck.versionStatus === "unsupported" ||
+                restorePreview.schemaCheck.versionStatus === "missing") && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                  ⚠️ এই ব্যাকআপ ফাইলটি প্রত্যাশিত স্কিমার সাথে মেলে না। Restore
+                  চালালে কিছু রেকর্ড যুক্ত নাও হতে পারে।
+                </div>
+              )}
+              {restorePreview.schemaCheck.unknownTables.length > 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  অজানা টেবিল উপেক্ষা করা হবে:{" "}
+                  {restorePreview.schemaCheck.unknownTables.join(", ")}
+                </p>
+              )}
+
               <ScrollArea className="h-56 rounded-md border p-3">
                 <ul className="space-y-1 text-sm">
                   {restorePreview.counts.map((c) => (
@@ -1243,6 +1345,36 @@ export function Settings() {
                   করতে হবে।
                 </p>
               )}
+
+              {/* Validation summary */}
+              <div className="rounded-md border p-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span>
+                    🔍 ভ্যালিডেশন:{" "}
+                    {restorePreview.incompleteTotal === 0 ? (
+                      <span className="text-emerald-600 font-medium">
+                        সব রেকর্ড সম্পূর্ণ ✓
+                      </span>
+                    ) : (
+                      <span className="text-amber-600 dark:text-amber-400 font-medium">
+                        {restorePreview.incompleteTotal} টি রেকর্ডে আবশ্যক ফিল্ড অনুপস্থিত
+                      </span>
+                    )}
+                  </span>
+                  {restorePreview.incompleteTotal > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowValidation(true)}
+                    >
+                      বিস্তারিত দেখুন
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  অপূর্ণ রেকর্ডও Restore হবে — পরে আপনি নিজে পূরণ করতে পারবেন।
+                </p>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -1308,6 +1440,23 @@ export function Settings() {
           )}
           <DialogFooter>
             <Button onClick={() => setRestoreResult(null)}>বন্ধ করুন</Button>
+            {restoreResult &&
+              restoreResult.perTable.some(
+                (r) => (r.failedRows?.length ?? 0) > 0,
+              ) && (
+                <Button
+                  variant="secondary"
+                  onClick={retryFailedRows}
+                  disabled={isRetrying}
+                >
+                  {isRetrying
+                    ? "⏳ Retrying..."
+                    : `🔁 ব্যর্থ রেকর্ড পুনরায় চেষ্টা (${restoreResult.perTable.reduce(
+                        (s, r) => s + (r.failedRows?.length ?? 0),
+                        0,
+                      )})`}
+                </Button>
+              )}
             <Button
               variant="outline"
               onClick={() => {
@@ -1317,6 +1466,79 @@ export function Settings() {
             >
               পেইজ রিফ্রেশ করুন
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Validation report dialog ---------- */}
+      <Dialog open={showValidation} onOpenChange={setShowValidation}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>🔍 অপূর্ণ রেকর্ড রিপোর্ট</DialogTitle>
+            <DialogDescription>
+              যেসব রেকর্ডে আবশ্যক ফিল্ড অনুপস্থিত (যেমন product id / IMEI),
+              টেবিল অনুযায়ী নিচে দেখানো হলো।
+            </DialogDescription>
+          </DialogHeader>
+          {restorePreview && (
+            <ScrollArea className="h-[60vh] rounded-md border p-3">
+              <div className="space-y-4 text-sm">
+                {restorePreview.validation
+                  .filter((v) => v.incomplete.length > 0)
+                  .map((v) => (
+                    <div key={v.table}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium capitalize">
+                          {v.table.replace("_", " ")}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Badge variant="default">{v.complete} সম্পূর্ণ</Badge>
+                          <Badge variant="destructive">
+                            {v.incomplete.length} অপূর্ণ
+                          </Badge>
+                        </span>
+                      </div>
+                      <ul className="space-y-1 pl-3 border-l border-border">
+                        {v.incomplete.slice(0, 50).map((row) => (
+                          <li
+                            key={`${v.table}-${row.index}`}
+                            className="text-[12px]"
+                          >
+                            <span className="text-muted-foreground">
+                              #{row.index + 1}
+                            </span>{" "}
+                            <span className="font-mono">
+                              {row.id ?? "(no id)"}
+                            </span>
+                            {row.name && (
+                              <span className="text-muted-foreground">
+                                {" "}
+                                — {row.name}
+                              </span>
+                            )}
+                            <span className="ml-2 text-destructive">
+                              missing: {row.missing.join(", ")}
+                            </span>
+                          </li>
+                        ))}
+                        {v.incomplete.length > 50 && (
+                          <li className="text-[11px] text-muted-foreground">
+                            … আরো {v.incomplete.length - 50} টি রেকর্ড
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  ))}
+                {restorePreview.incompleteTotal === 0 && (
+                  <p className="text-emerald-600">
+                    ✓ সব রেকর্ডে আবশ্যক ফিল্ড উপস্থিত আছে।
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setShowValidation(false)}>বন্ধ করুন</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
