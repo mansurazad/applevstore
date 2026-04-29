@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,7 +11,8 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { LocalDB } from "@/lib/localdb/adapter";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Printer } from "lucide-react";
+import { useReactToPrint } from "react-to-print";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -23,6 +24,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { ActivityLogger } from "@/hooks/useActivityLog";
 import { BrandingSettings } from "@/components/BrandingSettings";
 import { SyncSettingsPanel } from "@/components/SyncSettingsPanel";
+import { RefreshCachePanel } from "@/components/RefreshCachePanel";
 import { DesktopBuildWizard } from "@/components/DesktopBuildWizard";
 import {
   AlertDialog,
