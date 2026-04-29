@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentUserId } from "@/lib/auth/offlineAuth";
 import { toast } from "sonner";
 import { InvoiceModal } from "./InvoiceModal";
 import { BarcodeScanner } from "./BarcodeScanner";
@@ -81,8 +82,9 @@ export function POS() {
 
   const completeSaleMutation = useMutation({
     mutationFn: async (saleData: any) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const userId = await getCurrentUserId();
+      if (!userId) throw new Error("Not authenticated");
+      const user = { id: userId };
 
       // 1) Create sale locally (offline-first). Sync engine pushes in background.
       const sale: any = await localDb.sales.create({
