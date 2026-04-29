@@ -536,9 +536,23 @@ export function Settings() {
         {/* Cloud sync controls */}
         <SyncSettingsPanel />
 
+        {/* Manual offline cache refresh */}
+        <RefreshCachePanel />
+
         {/* Database Statistics */}
         <Card className="p-6">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">📊 Database Statistics</h2>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <h2 className="text-xl font-semibold text-foreground">📊 Database Statistics</h2>
+          <Button
+            onClick={() => handlePrintStats()}
+            variant="outline"
+            size="sm"
+            className="gap-2"
+          >
+            <Printer className="h-4 w-4" />
+            PDF এক্সপোর্ট
+          </Button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-primary/5 rounded-lg p-4">
             <p className="text-sm text-muted-foreground">Products</p>
