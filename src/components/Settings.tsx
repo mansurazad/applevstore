@@ -25,6 +25,7 @@ import { ActivityLogger } from "@/hooks/useActivityLog";
 import { BrandingSettings } from "@/components/BrandingSettings";
 import { SyncSettingsPanel } from "@/components/SyncSettingsPanel";
 import { RefreshCachePanel } from "@/components/RefreshCachePanel";
+import { CachedLoginPanel } from "@/components/CachedLoginPanel";
 import { DesktopBuildWizard } from "@/components/DesktopBuildWizard";
 import {
   AlertDialog,
@@ -538,6 +539,9 @@ export function Settings() {
 
         {/* Manual offline cache refresh */}
         <RefreshCachePanel />
+
+        {/* Manage cached offline login credentials (admin only) */}
+        {isAdmin && <CachedLoginPanel />}
 
         {/* Database Statistics */}
         <Card className="p-6">

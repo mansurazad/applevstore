@@ -13,6 +13,7 @@ import defaultLogo from "@/assets/3926e988-d85b-4bf1-8f3e-71bdbe4a2e70.png";
 import { LocalDBProvider } from "@/lib/localdb/LocalDBProvider";
 import { SyncProvider } from "@/lib/sync/SyncProvider";
 import { updateCachedSession } from "@/lib/auth/offlineAuth";
+import { OfflineActivitySyncIndicator } from "@/components/OfflineActivitySyncIndicator";
 
 const queryClient = new QueryClient();
 
@@ -89,6 +90,7 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
+            {user && <OfflineActivitySyncIndicator />}
           </SyncProvider>
         </LocalDBProvider>
       </TooltipProvider>

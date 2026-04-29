@@ -27,6 +27,7 @@ import { bn } from "date-fns/locale";
 import { useOfflineQuery } from "@/hooks/useOfflineQuery";
 import { LocalDB } from "@/lib/localdb/adapter";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { OfflineActivitySyncInline } from "@/components/OfflineActivitySyncIndicator";
 import { 
   Activity, 
   Shield, 
@@ -270,10 +271,13 @@ export function ActivityLog() {
           <Activity className="w-6 h-6 text-primary" />
           <h2 className="text-xl font-semibold text-foreground">📋 অ্যাক্টিভিটি লগ</h2>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="w-4 h-4 mr-2" />
-          রিফ্রেশ
-        </Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <OfflineActivitySyncInline />
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            রিফ্রেশ
+          </Button>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
