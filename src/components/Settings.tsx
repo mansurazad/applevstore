@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,7 +11,8 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { LocalDB } from "@/lib/localdb/adapter";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Printer } from "lucide-react";
+import { useReactToPrint } from "react-to-print";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -23,6 +24,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { ActivityLogger } from "@/hooks/useActivityLog";
 import { BrandingSettings } from "@/components/BrandingSettings";
 import { SyncSettingsPanel } from "@/components/SyncSettingsPanel";
+import { RefreshCachePanel } from "@/components/RefreshCachePanel";
 import { DesktopBuildWizard } from "@/components/DesktopBuildWizard";
 import {
   AlertDialog,
@@ -70,6 +72,11 @@ export function Settings() {
   const [profitDateFrom, setProfitDateFrom] = useState<Date | undefined>(undefined);
   const [profitDateTo, setProfitDateTo] = useState<Date | undefined>(undefined);
   const [activePeriod, setActivePeriod] = useState<string>("all");
+  const dbStatsPrintRef = useRef<HTMLDivElement>(null);
+  const handlePrintStats = useReactToPrint({
+    contentRef: dbStatsPrintRef,
+    documentTitle: `database-statistics-${format(new Date(), "yyyy-MM-dd")}`,
+  });
 
   // Get database stats (counts only) – offline-aware
   const { data: stats } = useOfflineQuery(
@@ -529,9 +536,23 @@ export function Settings() {
         {/* Cloud sync controls */}
         <SyncSettingsPanel />
 
+        {/* Manual offline cache refresh */}
+        <RefreshCachePanel />
+
         {/* Database Statistics */}
         <Card className="p-6">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">📊 Database Statistics</h2>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <h2 className="text-xl font-semibold text-foreground">📊 Database Statistics</h2>
+          <Button
+            onClick={() => handlePrintStats()}
+            variant="outline"
+            size="sm"
+            className="gap-2"
+          >
+            <Printer className="h-4 w-4" />
+            PDF এক্সপোর্ট
+          </Button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-primary/5 rounded-lg p-4">
             <p className="text-sm text-muted-foreground">Products</p>
@@ -674,6 +695,73 @@ export function Settings() {
           <StockSyncCheck />
         </div>
         </Card>
+
+        {/* Hidden printable Database Statistics report (offline-capable PDF) */}
+        <div className="hidden">
+          <div ref={dbStatsPrintRef} className="p-8 bg-white text-black">
+            <div className="flex items-center justify-between border-b border-gray-300 pb-4 mb-6">
+              <div>
+                <h1 className="text-2xl font-bold">{settings.shop_name}</h1>
+                <p className="text-sm text-gray-600">{settings.shop_subtitle}</p>
+                {settings.shop_address && (
+                  <p className="text-xs text-gray-500 mt-1">{settings.shop_address}</p>
+                )}
+              </div>
+              <img src={logoSrc} alt="logo" className="w-16 h-16 object-contain" />
+            </div>
+
+            <h2 className="text-xl font-semibold mb-1">Database Statistics Report</h2>
+            <p className="text-xs text-gray-500 mb-4">
+              Generated: {format(new Date(), "PPpp")}
+              {!isOnline && " (Offline — local cache)"}
+            </p>
+
+            <table className="w-full text-sm border-collapse mb-6">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-gray-300 text-left p-2">Metric</th>
+                  <th className="border border-gray-300 text-right p-2">Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td className="border border-gray-300 p-2">Products</td><td className="border border-gray-300 p-2 text-right">{stats?.products || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Categories</td><td className="border border-gray-300 p-2 text-right">{stats?.categories || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Customers</td><td className="border border-gray-300 p-2 text-right">{stats?.customers || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Suppliers</td><td className="border border-gray-300 p-2 text-right">{stats?.suppliers || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Sales</td><td className="border border-gray-300 p-2 text-right">{stats?.sales || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Purchases</td><td className="border border-gray-300 p-2 text-right">{stats?.purchases || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Sale items</td><td className="border border-gray-300 p-2 text-right">{stats?.saleItems || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Purchase items</td><td className="border border-gray-300 p-2 text-right">{stats?.purchaseItems || 0}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Returns</td><td className="border border-gray-300 p-2 text-right">{stats?.returns || 0}</td></tr>
+                <tr className="font-bold bg-gray-50"><td className="border border-gray-300 p-2">Total records</td><td className="border border-gray-300 p-2 text-right">{totalRecords}</td></tr>
+              </tbody>
+            </table>
+
+            <h3 className="text-lg font-semibold mb-2">Profit Statistics</h3>
+            <p className="text-xs text-gray-500 mb-2">
+              Period: {activePeriod === "all" ? "All time" : activePeriod}
+              {profitDateFrom && ` — from ${format(profitDateFrom, "PP")}`}
+              {profitDateTo && ` to ${format(profitDateTo, "PP")}`}
+            </p>
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-gray-300 text-left p-2">Category</th>
+                  <th className="border border-gray-300 text-right p-2">Profit (৳)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td className="border border-gray-300 p-2">New mobile profit</td><td className="border border-gray-300 p-2 text-right">{(profitStats?.newMobileProfit || 0).toLocaleString()}</td></tr>
+                <tr><td className="border border-gray-300 p-2">Used mobile profit</td><td className="border border-gray-300 p-2 text-right">{(profitStats?.usedMobileProfit || 0).toLocaleString()}</td></tr>
+                <tr className="font-bold bg-gray-50"><td className="border border-gray-300 p-2">Total profit</td><td className="border border-gray-300 p-2 text-right">{(profitStats?.totalProfit || 0).toLocaleString()}</td></tr>
+              </tbody>
+            </table>
+
+            <p className="text-xs text-gray-400 mt-8 text-center">
+              {settings.shop_name} — Database Statistics Report
+            </p>
+          </div>
+        </div>
 
         {/* Staff Performance Report */}
         <StaffPerformanceReport />
