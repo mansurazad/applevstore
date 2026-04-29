@@ -1139,6 +1139,187 @@ export function Settings() {
       {/* Branding Settings - visible for admin users */}
       {isAdmin && <BrandingSettings />}
       </div>
+
+      {/* ---------- Backup preview dialog ---------- */}
+      <Dialog
+        open={!!backupPreview}
+        onOpenChange={(o) => !o && setBackupPreview(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>📦 ব্যাকআপ প্রিভিউ</DialogTitle>
+            <DialogDescription>
+              নিচের তথ্য JSON ফাইলে অন্তর্ভুক্ত হবে। ডাউনলোড নিশ্চিত করতে
+              "ডাউনলোড করুন" বাটনে ক্লিক করুন।
+            </DialogDescription>
+          </DialogHeader>
+          {backupPreview && (
+            <div className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                মোট রেকর্ড:{" "}
+                <span className="font-semibold text-foreground">
+                  {backupPreview.total}
+                </span>
+              </div>
+              <ScrollArea className="h-64 rounded-md border p-3">
+                <ul className="space-y-1 text-sm">
+                  {backupPreview.counts.map((c) => (
+                    <li
+                      key={c.table}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="capitalize">{c.table.replace("_", " ")}</span>
+                      <Badge variant={c.count ? "default" : "secondary"}>
+                        {c.count}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBackupPreview(null)}>
+              বাতিল
+            </Button>
+            <Button onClick={confirmBackupDownload}>📥 ডাউনলোড করুন</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Restore preview dialog ---------- */}
+      <Dialog
+        open={!!restorePreview}
+        onOpenChange={(o) => !o && !isRestoring && setRestorePreview(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>📤 Restore প্রিভিউ</DialogTitle>
+            <DialogDescription>
+              ফাইলে যা আছে তার বিস্তারিত নিচে দেখানো হলো। নিশ্চিত হলে
+              "Restore শুরু করুন" এ ক্লিক করুন। বিদ্যমান রেকর্ড একই ID থাকলে
+              আপডেট হবে, নতুন গুলো যোগ হবে — কিছুই মুছবে না।
+            </DialogDescription>
+          </DialogHeader>
+          {restorePreview && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>📄 ফাইল: {restorePreview.fileName}</div>
+                {restorePreview.version && (
+                  <div>সংস্করণ: {restorePreview.version}</div>
+                )}
+                {restorePreview.timestamp && (
+                  <div>
+                    ব্যাকআপ সময়:{" "}
+                    {new Date(restorePreview.timestamp).toLocaleString("bn-BD")}
+                  </div>
+                )}
+                <div>
+                  মোট রেকর্ড:{" "}
+                  <span className="font-semibold text-foreground">
+                    {restorePreview.total}
+                  </span>
+                </div>
+              </div>
+              <ScrollArea className="h-56 rounded-md border p-3">
+                <ul className="space-y-1 text-sm">
+                  {restorePreview.counts.map((c) => (
+                    <li
+                      key={c.table}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="capitalize">{c.table.replace("_", " ")}</span>
+                      <Badge variant={c.count ? "default" : "secondary"}>
+                        {c.count}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+              {restorePreview.missingTables.length > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  ⚠️ এই টেবিলগুলো ফাইলে নেই (অপূর্ণ):{" "}
+                  {restorePreview.missingTables.join(", ")} — পরে নিজে যুক্ত
+                  করতে হবে।
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRestorePreview(null)}
+              disabled={isRestoring}
+            >
+              বাতিল
+            </Button>
+            <Button onClick={confirmRestore} disabled={isRestoring}>
+              {isRestoring ? "⏳ Restoring..." : "Restore শুরু করুন"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Restore result dialog ---------- */}
+      <Dialog
+        open={!!restoreResult}
+        onOpenChange={(o) => !o && setRestoreResult(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>✅ Restore সম্পন্ন</DialogTitle>
+            <DialogDescription>
+              টেবিল অনুযায়ী বিস্তারিত ফলাফল নিচে দেখানো হলো।
+            </DialogDescription>
+          </DialogHeader>
+          {restoreResult && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                সময় লেগেছে: {(restoreResult.durationMs / 1000).toFixed(1)} সেকেন্ড
+              </div>
+              <ScrollArea className="h-64 rounded-md border p-3">
+                <ul className="space-y-2 text-sm">
+                  {restoreResult.perTable.map((r) => (
+                    <li key={r.table} className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="capitalize font-medium">
+                          {r.table.replace("_", " ")}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Badge variant="default">{r.ok} ok</Badge>
+                          {r.failed > 0 && (
+                            <Badge variant="destructive">
+                              {r.failed} failed
+                            </Badge>
+                          )}
+                          <Badge variant="secondary">{r.tried} tried</Badge>
+                        </span>
+                      </div>
+                      {r.error && (
+                        <p className="text-[11px] text-destructive">
+                          {r.error}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setRestoreResult(null)}>বন্ধ করুন</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRestoreResult(null);
+                window.location.reload();
+              }}
+            >
+              পেইজ রিফ্রেশ করুন
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
