@@ -482,6 +482,55 @@ export function Settings() {
     }
   };
 
+  /**
+   * Re-attempt only the rows that failed during the previous restore.
+   * Updates `restoreResult` in place so the user can keep retrying until
+   * everything succeeds, without re-uploading the full backup file.
+   */
+  const retryFailedRows = async () => {
+    if (!restoreResult) return;
+    const failingTables = restoreResult.perTable.filter(
+      (r) => r.failedRows && r.failedRows.length > 0,
+    );
+    if (!failingTables.length) {
+      toast.info("Retry করার মতো ব্যর্থ রেকর্ড নেই");
+      return;
+    }
+    setIsRetrying(true);
+    const startedAt = Date.now();
+    try {
+      toast.info("ব্যর্থ রেকর্ডগুলো পুনরায় চেষ্টা হচ্ছে…");
+      const next = restoreResult.perTable.map((r) => ({ ...r }));
+      let recovered = 0;
+      let stillFailed = 0;
+      for (const entry of next) {
+        if (!entry.failedRows || entry.failedRows.length === 0) continue;
+        const res = await upsertBatch(entry.table, entry.failedRows);
+        entry.ok += res.ok;
+        entry.failed = res.failed;
+        entry.failedRows = res.failedRows;
+        entry.error = res.error;
+        recovered += res.ok;
+        stillFailed += res.failed;
+      }
+      setRestoreResult({
+        perTable: next,
+        durationMs: (restoreResult.durationMs ?? 0) + (Date.now() - startedAt),
+      });
+      if (stillFailed === 0) {
+        toast.success(`সব ${recovered} টি রেকর্ড পুনরুদ্ধার হয়েছে ✓`);
+      } else {
+        toast.warning(
+          `${recovered} সফল · ${stillFailed} এখনো ব্যর্থ — আবার চেষ্টা করতে পারো`,
+        );
+      }
+    } catch (e: any) {
+      toast.error("Retry ব্যর্থ: " + e.message);
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   const fetchResetStats = async () => {
     try {
       const [salesRes, saleItemsRes, returnsRes, purchasesRes, purchaseItemsRes, productsRes, customersRes, suppliersRes, categoriesRes] = await Promise.all([
