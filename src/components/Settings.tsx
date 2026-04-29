@@ -38,6 +38,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 
 export function Settings() {
   const navigate = useNavigate();
@@ -50,6 +60,27 @@ export function Settings() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isClearingSales, setIsClearingSales] = useState(false);
+  // ---- Backup / Restore preview state ----
+  type TableCount = { table: string; count: number };
+  const [backupPreview, setBackupPreview] = useState<{
+    counts: TableCount[];
+    payload: any;
+    total: number;
+  } | null>(null);
+  const [restorePreview, setRestorePreview] = useState<{
+    fileName: string;
+    counts: TableCount[];
+    payload: any;
+    total: number;
+    version?: string;
+    timestamp?: string;
+    missingTables: string[];
+  } | null>(null);
+  const [restoreResult, setRestoreResult] = useState<{
+    perTable: { table: string; tried: number; ok: number; failed: number; error?: string }[];
+    durationMs: number;
+  } | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const [resetStats, setResetStats] = useState<{
     sales: number;
     saleItems: number;
@@ -212,154 +243,211 @@ export function Settings() {
     }
   };
 
+  // ---- Tables we back up, in dependency order (parents first) ----
+  const BACKUP_TABLES = [
+    "categories",
+    "suppliers",
+    "customers",
+    "products",
+    "sales",
+    "purchases",
+    "sale_items",
+    "purchase_items",
+    "returns",
+  ] as const;
+  type BackupTable = typeof BACKUP_TABLES[number];
+
+  /**
+   * STEP 1 of backup: pull every table from the server and open the
+   * preview dialog. Nothing is downloaded until the user confirms.
+   */
   const handleBackup = async () => {
     setIsBackingUp(true);
     try {
-      toast.info("Starting backup...");
+      toast.info("ব্যাকআপ প্রিভিউ তৈরি হচ্ছে…");
 
-      // Fetch all data from all tables
-      const [products, categories, customers, suppliers, sales, saleItems, purchases, purchaseItems, returns] = await Promise.all([
-        supabase.from("products").select("*"),
-        supabase.from("categories").select("*"),
-        supabase.from("customers").select("*"),
-        supabase.from("suppliers").select("*"),
-        supabase.from("sales").select("*"),
-        supabase.from("sale_items").select("*"),
-        supabase.from("purchases").select("*"),
-        supabase.from("purchase_items").select("*"),
-        supabase.from("returns").select("*"),
-      ]);
+      const data: Record<string, any[]> = {};
+      const counts: TableCount[] = [];
+      let total = 0;
+      for (const t of BACKUP_TABLES) {
+        const { data: rows, error } = await supabase.from(t).select("*");
+        if (error) throw new Error(`${t}: ${error.message}`);
+        data[t] = rows || [];
+        counts.push({ table: t, count: rows?.length || 0 });
+        total += rows?.length || 0;
+      }
 
-      const backup = {
-        version: "1.0",
+      const payload = {
+        version: "1.1",
         timestamp: new Date().toISOString(),
-        data: {
-          products: products.data || [],
-          categories: categories.data || [],
-          customers: customers.data || [],
-          suppliers: suppliers.data || [],
-          sales: sales.data || [],
-          sale_items: saleItems.data || [],
-          purchases: purchases.data || [],
-          purchase_items: purchaseItems.data || [],
-          returns: returns.data || [],
-        },
+        data,
       };
-
-      // Create and download JSON file
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `stockpro-backup-${new Date().toISOString().split("T")[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success("Backup completed successfully!");
-      await ActivityLogger.dataBackup();
+      setBackupPreview({ counts, payload, total });
     } catch (error: any) {
-      toast.error("Backup failed: " + error.message);
+      toast.error("Backup ব্যর্থ: " + error.message);
     } finally {
       setIsBackingUp(false);
     }
   };
 
-  const handleRestore = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  /**
+   * STEP 2 of backup: actually download the JSON the user just previewed.
+   */
+  const confirmBackupDownload = async () => {
+    if (!backupPreview) return;
+    try {
+      const blob = new Blob([JSON.stringify(backupPreview.payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `applestore-backup-${new Date()
+        .toISOString()
+        .split("T")[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success("ব্যাকআপ ডাউনলোড হয়েছে");
+      await ActivityLogger.dataBackup();
+      setBackupPreview(null);
+    } catch (e: any) {
+      toast.error("Download ব্যর্থ: " + e.message);
+    }
+  };
+
+  /**
+   * STEP 1 of restore: parse the file and show a preview of what's
+   * inside. NOTHING is written to the database until the user clicks
+   * "Restore" inside the preview dialog.
+   */
+  const handleRestoreFile = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    setIsRestoring(true);
     try {
-      toast.info("Starting restore...");
-
       const text = await file.text();
       const backup = JSON.parse(text);
+      if (!backup.data || typeof backup.data !== "object") {
+        throw new Error("ফাইলটি বৈধ ব্যাকআপ নয় (data অংশ নেই)");
+      }
+      const counts: TableCount[] = [];
+      const missing: string[] = [];
+      let total = 0;
+      for (const t of BACKUP_TABLES) {
+        const arr = backup.data[t];
+        if (!Array.isArray(arr)) {
+          missing.push(t);
+          continue;
+        }
+        counts.push({ table: t, count: arr.length });
+        total += arr.length;
+      }
+      setRestorePreview({
+        fileName: file.name,
+        counts,
+        payload: backup,
+        total,
+        version: backup.version,
+        timestamp: backup.timestamp,
+        missingTables: missing,
+      });
+    } catch (e: any) {
+      toast.error("Restore প্রিভিউ ব্যর্থ: " + e.message);
+    } finally {
+      event.target.value = "";
+    }
+  };
 
-      if (!backup.version || !backup.data) {
-        throw new Error("Invalid backup file format");
+  /**
+   * Upsert rows in batches so a single duplicate doesn't kill the whole
+   * table. Returns per-row success/fail counts.
+   */
+  const upsertBatch = async (
+    table: string,
+    rows: any[],
+  ): Promise<{ ok: number; failed: number; error?: string }> => {
+    const BATCH = 200;
+    let ok = 0;
+    let failed = 0;
+    let firstError: string | undefined;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const slice = rows.slice(i, i + BATCH);
+      const { error } = await (supabase.from as any)(table)
+        .upsert(slice, { onConflict: "id" });
+      if (error) {
+        // Try one-by-one to recover individual rows
+        for (const row of slice) {
+          const { error: e2 } = await (supabase.from as any)(table)
+            .upsert(row, { onConflict: "id" });
+          if (e2) {
+            failed++;
+            if (!firstError) firstError = e2.message;
+          } else {
+            ok++;
+          }
+        }
+      } else {
+        ok += slice.length;
+      }
+    }
+    return { ok, failed, error: firstError };
+  };
+
+  /**
+   * STEP 2 of restore: perform the actual upsert. Uses upsert+batching
+   * so existing rows are merged instead of erroring, and a single bad
+   * row never wipes out the rest of the file.
+   */
+  const confirmRestore = async () => {
+    if (!restorePreview) return;
+    setIsRestoring(true);
+    setRestoreResult(null);
+    const startedAt = Date.now();
+    const perTable: {
+      table: string;
+      tried: number;
+      ok: number;
+      failed: number;
+      error?: string;
+    }[] = [];
+    try {
+      toast.info("Restore শুরু হয়েছে — অপেক্ষা করুন…");
+      for (const t of BACKUP_TABLES) {
+        const rows = (restorePreview.payload.data?.[t] as any[]) || [];
+        if (!rows.length) {
+          perTable.push({ table: t, tried: 0, ok: 0, failed: 0 });
+          continue;
+        }
+        const res = await upsertBatch(t, rows);
+        perTable.push({
+          table: t,
+          tried: rows.length,
+          ok: res.ok,
+          failed: res.failed,
+          error: res.error,
+        });
       }
 
-      // Clear existing data first (in correct order respecting foreign keys)
-      // 1. Delete returns first (references sale_items)
-      await supabase.from("returns").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      
-      // 2. Delete sale_items and purchase_items
-      await Promise.all([
-        supabase.from("sale_items").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-        supabase.from("purchase_items").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-      ]);
-
-      // 3. Delete sales and purchases
-      await Promise.all([
-        supabase.from("sales").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-        supabase.from("purchases").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-      ]);
-
-      // 4. Delete products (references categories)
-      await supabase.from("products").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-
-      // 5. Delete base tables
-      await Promise.all([
-        supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-        supabase.from("suppliers").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-        supabase.from("categories").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-      ]);
-
-      // Insert restored data
-      const insertPromises = [];
-
-      if (backup.data.categories?.length) {
-        insertPromises.push(supabase.from("categories").insert(backup.data.categories));
+      const totalOk = perTable.reduce((s, r) => s + r.ok, 0);
+      const totalFail = perTable.reduce((s, r) => s + r.failed, 0);
+      setRestoreResult({ perTable, durationMs: Date.now() - startedAt });
+      if (totalFail === 0) {
+        toast.success(`Restore সম্পন্ন — ${totalOk} টি রেকর্ড যুক্ত হয়েছে`);
+      } else {
+        toast.warning(
+          `Restore আংশিক সফল — ${totalOk} সফল, ${totalFail} ব্যর্থ`,
+        );
       }
-      if (backup.data.suppliers?.length) {
-        insertPromises.push(supabase.from("suppliers").insert(backup.data.suppliers));
-      }
-      if (backup.data.customers?.length) {
-        insertPromises.push(supabase.from("customers").insert(backup.data.customers));
-      }
-      if (backup.data.products?.length) {
-        insertPromises.push(supabase.from("products").insert(backup.data.products));
-      }
-
-      await Promise.all(insertPromises);
-
-      // Insert sales and purchases
-      const transactionPromises = [];
-      if (backup.data.sales?.length) {
-        transactionPromises.push(supabase.from("sales").insert(backup.data.sales));
-      }
-      if (backup.data.purchases?.length) {
-        transactionPromises.push(supabase.from("purchases").insert(backup.data.purchases));
-      }
-
-      await Promise.all(transactionPromises);
-
-      // Insert related items
-      const itemPromises = [];
-      if (backup.data.sale_items?.length) {
-        itemPromises.push(supabase.from("sale_items").insert(backup.data.sale_items));
-      }
-      if (backup.data.purchase_items?.length) {
-        itemPromises.push(supabase.from("purchase_items").insert(backup.data.purchase_items));
-      }
-
-      await Promise.all(itemPromises);
-
-      // Insert returns last
-      if (backup.data.returns?.length) {
-        await supabase.from("returns").insert(backup.data.returns);
-      }
-
-      toast.success("Data restored successfully! Refreshing...");
       await ActivityLogger.dataRestore();
-      setTimeout(() => window.location.reload(), 1500);
+      setRestorePreview(null);
     } catch (error: any) {
-      toast.error("Restore failed: " + error.message);
+      toast.error("Restore ব্যর্থ: " + error.message);
+      setRestoreResult({ perTable, durationMs: Date.now() - startedAt });
     } finally {
       setIsRestoring(false);
-      event.target.value = "";
     }
   };
 
@@ -804,10 +892,11 @@ export function Settings() {
               <input
                 type="file"
                 accept=".json"
-                onChange={handleRestore}
+                onChange={handleRestoreFile}
                 disabled={isRestoring}
                 className="hidden"
                 id="restore-file"
+                ref={restoreInputRef}
               />
               <Button
                 onClick={() => document.getElementById("restore-file")?.click()}
@@ -1050,6 +1139,187 @@ export function Settings() {
       {/* Branding Settings - visible for admin users */}
       {isAdmin && <BrandingSettings />}
       </div>
+
+      {/* ---------- Backup preview dialog ---------- */}
+      <Dialog
+        open={!!backupPreview}
+        onOpenChange={(o) => !o && setBackupPreview(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>📦 ব্যাকআপ প্রিভিউ</DialogTitle>
+            <DialogDescription>
+              নিচের তথ্য JSON ফাইলে অন্তর্ভুক্ত হবে। ডাউনলোড নিশ্চিত করতে
+              "ডাউনলোড করুন" বাটনে ক্লিক করুন।
+            </DialogDescription>
+          </DialogHeader>
+          {backupPreview && (
+            <div className="space-y-3">
+              <div className="text-sm text-muted-foreground">
+                মোট রেকর্ড:{" "}
+                <span className="font-semibold text-foreground">
+                  {backupPreview.total}
+                </span>
+              </div>
+              <ScrollArea className="h-64 rounded-md border p-3">
+                <ul className="space-y-1 text-sm">
+                  {backupPreview.counts.map((c) => (
+                    <li
+                      key={c.table}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="capitalize">{c.table.replace("_", " ")}</span>
+                      <Badge variant={c.count ? "default" : "secondary"}>
+                        {c.count}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBackupPreview(null)}>
+              বাতিল
+            </Button>
+            <Button onClick={confirmBackupDownload}>📥 ডাউনলোড করুন</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Restore preview dialog ---------- */}
+      <Dialog
+        open={!!restorePreview}
+        onOpenChange={(o) => !o && !isRestoring && setRestorePreview(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>📤 Restore প্রিভিউ</DialogTitle>
+            <DialogDescription>
+              ফাইলে যা আছে তার বিস্তারিত নিচে দেখানো হলো। নিশ্চিত হলে
+              "Restore শুরু করুন" এ ক্লিক করুন। বিদ্যমান রেকর্ড একই ID থাকলে
+              আপডেট হবে, নতুন গুলো যোগ হবে — কিছুই মুছবে না।
+            </DialogDescription>
+          </DialogHeader>
+          {restorePreview && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>📄 ফাইল: {restorePreview.fileName}</div>
+                {restorePreview.version && (
+                  <div>সংস্করণ: {restorePreview.version}</div>
+                )}
+                {restorePreview.timestamp && (
+                  <div>
+                    ব্যাকআপ সময়:{" "}
+                    {new Date(restorePreview.timestamp).toLocaleString("bn-BD")}
+                  </div>
+                )}
+                <div>
+                  মোট রেকর্ড:{" "}
+                  <span className="font-semibold text-foreground">
+                    {restorePreview.total}
+                  </span>
+                </div>
+              </div>
+              <ScrollArea className="h-56 rounded-md border p-3">
+                <ul className="space-y-1 text-sm">
+                  {restorePreview.counts.map((c) => (
+                    <li
+                      key={c.table}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="capitalize">{c.table.replace("_", " ")}</span>
+                      <Badge variant={c.count ? "default" : "secondary"}>
+                        {c.count}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+              {restorePreview.missingTables.length > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  ⚠️ এই টেবিলগুলো ফাইলে নেই (অপূর্ণ):{" "}
+                  {restorePreview.missingTables.join(", ")} — পরে নিজে যুক্ত
+                  করতে হবে।
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRestorePreview(null)}
+              disabled={isRestoring}
+            >
+              বাতিল
+            </Button>
+            <Button onClick={confirmRestore} disabled={isRestoring}>
+              {isRestoring ? "⏳ Restoring..." : "Restore শুরু করুন"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- Restore result dialog ---------- */}
+      <Dialog
+        open={!!restoreResult}
+        onOpenChange={(o) => !o && setRestoreResult(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>✅ Restore সম্পন্ন</DialogTitle>
+            <DialogDescription>
+              টেবিল অনুযায়ী বিস্তারিত ফলাফল নিচে দেখানো হলো।
+            </DialogDescription>
+          </DialogHeader>
+          {restoreResult && (
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground">
+                সময় লেগেছে: {(restoreResult.durationMs / 1000).toFixed(1)} সেকেন্ড
+              </div>
+              <ScrollArea className="h-64 rounded-md border p-3">
+                <ul className="space-y-2 text-sm">
+                  {restoreResult.perTable.map((r) => (
+                    <li key={r.table} className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <span className="capitalize font-medium">
+                          {r.table.replace("_", " ")}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Badge variant="default">{r.ok} ok</Badge>
+                          {r.failed > 0 && (
+                            <Badge variant="destructive">
+                              {r.failed} failed
+                            </Badge>
+                          )}
+                          <Badge variant="secondary">{r.tried} tried</Badge>
+                        </span>
+                      </div>
+                      {r.error && (
+                        <p className="text-[11px] text-destructive">
+                          {r.error}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setRestoreResult(null)}>বন্ধ করুন</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRestoreResult(null);
+                window.location.reload();
+              }}
+            >
+              পেইজ রিফ্রেশ করুন
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

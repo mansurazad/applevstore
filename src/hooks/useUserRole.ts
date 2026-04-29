@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { getActiveLocalDB } from '@/lib/localdb';
 
 export type AppRole = 'admin' | 'manager' | 'staff';
 
@@ -59,6 +60,72 @@ function dbRowToPermissions(row: any): RolePermissions {
   };
 }
 
+/**
+ * Read the cached role + permissions written into Dexie by
+ * RefreshCachePanel / UserManagement. Used as an offline fallback so
+ * the dashboard renders even with no internet.
+ */
+async function readCachedRole(userId: string): Promise<{
+  role: AppRole;
+  permissions: RolePermissions;
+} | null> {
+  try {
+    const db = getActiveLocalDB();
+    if (!db) return null;
+    const roleRow = await db.user_roles_cache
+      .where('user_id')
+      .equals(userId)
+      .first();
+    const userRole = (roleRow?.role as AppRole) || 'staff';
+    let permissions: RolePermissions;
+    if (userRole === 'admin') {
+      permissions = fallbackPermissions.admin;
+    } else {
+      const permRow = await db.role_permissions_cache
+        .where('role')
+        .equals(userRole)
+        .first();
+      permissions = permRow
+        ? dbRowToPermissions(permRow)
+        : fallbackPermissions[userRole] || fallbackPermissions.staff;
+    }
+    return { role: userRole, permissions };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the freshly fetched role + permissions to the local cache so
+ * the next offline session can read them instantly.
+ */
+async function writeRoleCache(
+  userId: string,
+  role: AppRole,
+  permRow: any | null,
+) {
+  try {
+    const db = getActiveLocalDB();
+    if (!db) return;
+    const now = new Date().toISOString();
+    await db.user_roles_cache.put({
+      id: userId,
+      user_id: userId,
+      role,
+      _cachedAt: now,
+    } as any);
+    if (permRow) {
+      await db.role_permissions_cache.put({
+        ...permRow,
+        id: permRow.role,
+        _cachedAt: now,
+      } as any);
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export function useUserRole() {
   const [role, setRole] = useState<AppRole | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -70,7 +137,10 @@ export function useUserRole() {
   useEffect(() => {
     const fetchRole = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        // getSession() reads from local storage and works fully offline,
+        // unlike getUser() which can hang without a network connection.
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (!user) {
           setLoading(false);
           return;
@@ -78,42 +148,70 @@ export function useUserRole() {
 
         setUserId(user.id);
 
-        const { data, error } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Error fetching role:', error);
+        // ---- 1. Hydrate immediately from local cache (works offline) ----
+        const cached = await readCachedRole(user.id);
+        if (cached) {
+          setRole(cached.role);
+          setIsAdmin(cached.role === 'admin');
+          setIsManager(cached.role === 'manager' || cached.role === 'admin');
+          setPermissions(cached.permissions);
+          // Reveal the dashboard right away — no waiting on the network.
+          setLoading(false);
         }
 
-        const userRole = (data?.role as AppRole) || 'staff';
-        setRole(userRole);
-        setIsAdmin(userRole === 'admin');
-        setIsManager(userRole === 'manager' || userRole === 'admin');
-
-        // Fetch permissions from DB
-        const { data: permData, error: permError } = await supabase
-          .from('role_permissions')
-          .select('*')
-          .eq('role', userRole)
-          .maybeSingle();
-
-        if (permError || !permData) {
-          // Admin always gets full access regardless
-          if (userRole === 'admin') {
-            setPermissions(fallbackPermissions.admin);
-          } else {
-            setPermissions(fallbackPermissions[userRole] || fallbackPermissions.staff);
+        // ---- 2. If we're online, refresh from the server in the background ----
+        const online =
+          typeof navigator === 'undefined' ? true : navigator.onLine;
+        if (!online) {
+          if (!cached) {
+            // No cache + no network → safest default is staff.
+            setRole('staff');
+            setPermissions(fallbackPermissions.staff);
+            setLoading(false);
           }
-        } else {
-          // Admin always gets full access
-          if (userRole === 'admin') {
-            setPermissions(fallbackPermissions.admin);
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (error) console.error('Error fetching role:', error);
+
+          const userRole = (data?.role as AppRole) || cached?.role || 'staff';
+          setRole(userRole);
+          setIsAdmin(userRole === 'admin');
+          setIsManager(userRole === 'manager' || userRole === 'admin');
+
+          const { data: permData, error: permError } = await supabase
+            .from('role_permissions')
+            .select('*')
+            .eq('role', userRole)
+            .maybeSingle();
+
+          if (permError || !permData) {
+            if (userRole === 'admin') {
+              setPermissions(fallbackPermissions.admin);
+            } else {
+              setPermissions(
+                fallbackPermissions[userRole] || fallbackPermissions.staff,
+              );
+            }
           } else {
-            setPermissions(dbRowToPermissions(permData));
+            if (userRole === 'admin') {
+              setPermissions(fallbackPermissions.admin);
+            } else {
+              setPermissions(dbRowToPermissions(permData));
+            }
           }
+
+          // Refresh local cache for next offline session.
+          writeRoleCache(user.id, userRole, permData);
+        } catch (netErr) {
+          // Network failure mid-flight — keep cached values.
+          console.warn('Role refresh failed, using cache:', netErr);
         }
       } catch (error) {
         console.error('Error in useUserRole:', error);
