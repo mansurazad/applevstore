@@ -60,6 +60,27 @@ export function Settings() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isClearingSales, setIsClearingSales] = useState(false);
+  // ---- Backup / Restore preview state ----
+  type TableCount = { table: string; count: number };
+  const [backupPreview, setBackupPreview] = useState<{
+    counts: TableCount[];
+    payload: any;
+    total: number;
+  } | null>(null);
+  const [restorePreview, setRestorePreview] = useState<{
+    fileName: string;
+    counts: TableCount[];
+    payload: any;
+    total: number;
+    version?: string;
+    timestamp?: string;
+    missingTables: string[];
+  } | null>(null);
+  const [restoreResult, setRestoreResult] = useState<{
+    perTable: { table: string; tried: number; ok: number; failed: number; error?: string }[];
+    durationMs: number;
+  } | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const [resetStats, setResetStats] = useState<{
     sales: number;
     saleItems: number;
