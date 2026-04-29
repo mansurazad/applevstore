@@ -457,6 +457,7 @@ export function Settings() {
           ok: res.ok,
           failed: res.failed,
           error: res.error,
+          failedRows: res.failedRows,
         });
       }
 
