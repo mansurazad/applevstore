@@ -72,6 +72,11 @@ export function Settings() {
   const [profitDateFrom, setProfitDateFrom] = useState<Date | undefined>(undefined);
   const [profitDateTo, setProfitDateTo] = useState<Date | undefined>(undefined);
   const [activePeriod, setActivePeriod] = useState<string>("all");
+  const dbStatsPrintRef = useRef<HTMLDivElement>(null);
+  const handlePrintStats = useReactToPrint({
+    contentRef: dbStatsPrintRef,
+    documentTitle: `database-statistics-${format(new Date(), "yyyy-MM-dd")}`,
+  });
 
   // Get database stats (counts only) – offline-aware
   const { data: stats } = useOfflineQuery(
