@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import defaultLogo from "@/assets/3926e988-d85b-4bf1-8f3e-71bdbe4a2e70.png";
 import { LocalDBProvider } from "@/lib/localdb/LocalDBProvider";
 import { SyncProvider } from "@/lib/sync/SyncProvider";
+import { updateCachedSession } from "@/lib/auth/offlineAuth";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,16 @@ const App = () => {
       (_event, session) => {
         setUser(session?.user ?? null);
         setLoading(false);
+        // Keep the offline credential's cached session fresh whenever
+        // Supabase rotates tokens, so an offline relaunch can restore
+        // the latest valid session.
+        if (session?.user?.email) {
+          try {
+            updateCachedSession(session.user.email, session);
+          } catch {
+            /* non-fatal */
+          }
+        }
       }
     );
 
