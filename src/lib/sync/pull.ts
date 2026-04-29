@@ -118,13 +118,31 @@ export async function pullTable(table: LocalTableName): Promise<number> {
 
 /** Pull every sync table. Returns total rows merged. */
 export async function pullAll(): Promise<number> {
+  const detail = await pullAllDetailed();
+  return detail.total;
+}
+
+export type PullDetail = {
+  total: number;
+  perTable: Array<{ table: LocalTableName; rows: number; error?: string }>;
+};
+
+/**
+ * Same as pullAll() but returns a per-table breakdown so callers (e.g. the
+ * manual "Refresh cache" panel) can show a detailed result summary.
+ */
+export async function pullAllDetailed(): Promise<PullDetail> {
   let total = 0;
+  const perTable: PullDetail["perTable"] = [];
   for (const t of SYNC_TABLES) {
     try {
-      total += await pullTable(t);
-    } catch (e) {
+      const rows = await pullTable(t);
+      total += rows;
+      perTable.push({ table: t, rows });
+    } catch (e: any) {
       console.warn(`[sync:pull] ${t} threw`, e);
+      perTable.push({ table: t, rows: 0, error: e?.message ?? String(e) });
     }
   }
-  return total;
+  return { total, perTable };
 }
