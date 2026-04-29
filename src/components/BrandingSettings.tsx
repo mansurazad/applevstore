@@ -7,9 +7,12 @@ import { toast } from "sonner";
 import { useShopSettings } from "@/hooks/useShopSettings";
 import { Palette, Type, MapPin, Phone } from "lucide-react";
 import { CloudinaryUpload } from "./CloudinaryUpload";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 export function BrandingSettings() {
   const { settings, logoSrc, refetch } = useShopSettings();
+  const isOnline = useOnlineStatus();
   const [shopName, setShopName] = useState("");
   const [shopSubtitle, setShopSubtitle] = useState("");
   const [shopAddress, setShopAddress] = useState("");
@@ -49,6 +52,7 @@ export function BrandingSettings() {
   }, [settings?.id]);
 
   const handleSave = async () => {
+    if (!isOnline) { toast.error("অফলাইনে ব্র্যান্ডিং সংরক্ষণ করা যাবে না"); return; }
     if (!settingsId) {
       toast.error("সেটিংস লোড হয়নি, অনুগ্রহ করে পেজ রিফ্রেশ করুন।");
       return;
@@ -76,6 +80,7 @@ export function BrandingSettings() {
   };
 
   const handleLogoUpload = async (url: string) => {
+    if (!isOnline) { toast.error("অফলাইনে লোগো আপলোড করা যাবে না"); return; }
     if (!settingsId) return;
     try {
       const { error } = await supabase
@@ -91,6 +96,7 @@ export function BrandingSettings() {
   };
 
   const handleFaviconUpload = async (url: string) => {
+    if (!isOnline) { toast.error("অফলাইনে ফেভিকন আপলোড করা যাবে না"); return; }
     if (!settingsId) return;
     try {
       const { error } = await supabase
@@ -109,6 +115,7 @@ export function BrandingSettings() {
 
   return (
     <Card className="p-6 border border-accent/20 bg-gradient-to-br from-accent/5 to-transparent">
+      <OfflineBanner message="অফলাইনে ব্র্যান্ডিং তথ্য ক্যাশ থেকে দেখানো হচ্ছে — পরিবর্তন অনলাইনে ফিরলে চালু হবে।" />
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
           <Palette className="w-5 h-5 text-accent" />
@@ -180,7 +187,7 @@ export function BrandingSettings() {
           </div>
         </div>
 
-        <Button onClick={handleSave} disabled={saving || !settingsId} className="w-full md:w-auto bg-accent hover:bg-accent/90 text-white">
+        <Button onClick={handleSave} disabled={saving || !settingsId || !isOnline} className="w-full md:w-auto bg-accent hover:bg-accent/90 text-white">
           {saving ? "⏳ সংরক্ষণ হচ্ছে..." : "💾 সংরক্ষণ করুন"}
         </Button>
       </div>
