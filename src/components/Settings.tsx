@@ -366,6 +366,9 @@ export function Settings() {
         counts.push({ table: t, count: arr.length });
         total += arr.length;
       }
+      const schemaCheck = checkBackupSchema(backup);
+      const validation = validateBackupRows(backup);
+      const incompleteTotal = totalIncomplete(validation);
       setRestorePreview({
         fileName: file.name,
         counts,
@@ -374,6 +377,9 @@ export function Settings() {
         version: backup.version,
         timestamp: backup.timestamp,
         missingTables: missing,
+        schemaCheck,
+        validation,
+        incompleteTotal,
       });
     } catch (e: any) {
       toast.error("Restore প্রিভিউ ব্যর্থ: " + e.message);
