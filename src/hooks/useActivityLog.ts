@@ -1,4 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
+import { LocalDB } from '@/lib/localdb/adapter';
+import { getActiveLocalDB } from '@/lib/localdb';
 
 export type ActionType = 
   | 'auth' 
@@ -19,16 +21,39 @@ export interface LogActivityParams {
 export async function logActivity({ action, actionType, details }: LogActivityParams) {
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    
     if (!user) return;
 
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      user_email: user.email,
-      action,
-      action_type: actionType,
-      details: details || {},
-    });
+    // ----- Local-first write -----
+    // Always record to local Dexie immediately so the entry shows up in
+    // Activity Log even when offline. The sync engine will push the
+    // dirty row to Supabase as soon as the device is back online.
+    const db = getActiveLocalDB();
+    if (db) {
+      try {
+        await LocalDB.createLocal('activity_logs', {
+          user_id: user.id,
+          user_email: user.email ?? null,
+          action,
+          action_type: actionType,
+          details: details || {},
+        });
+        return; // sync engine handles server upload
+      } catch (e) {
+        console.warn('local activity log write failed, falling back to direct insert', e);
+      }
+    }
+
+    // Fallback: direct insert (used before local DB is ready, e.g. during
+    // the very first login flow).
+    if (navigator.onLine) {
+      await supabase.from('activity_logs').insert({
+        user_id: user.id,
+        user_email: user.email,
+        action,
+        action_type: actionType,
+        details: details || {},
+      });
+    }
   } catch (error) {
     console.error('Failed to log activity:', error);
   }
