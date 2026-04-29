@@ -375,14 +375,12 @@ export function Settings() {
     let firstError: string | undefined;
     for (let i = 0; i < rows.length; i += BATCH) {
       const slice = rows.slice(i, i + BATCH);
-      const { error } = await supabase
-        .from(table)
+      const { error } = await (supabase.from as any)(table)
         .upsert(slice, { onConflict: "id" });
       if (error) {
         // Try one-by-one to recover individual rows
         for (const row of slice) {
-          const { error: e2 } = await supabase
-            .from(table)
+          const { error: e2 } = await (supabase.from as any)(table)
             .upsert(row, { onConflict: "id" });
           if (e2) {
             failed++;
