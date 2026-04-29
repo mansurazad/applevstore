@@ -1300,7 +1300,26 @@ export function Settings() {
                     {restorePreview.total}
                   </span>
                 </div>
+                <div>
+                  স্কিমা: {describeVersion(restorePreview.schemaCheck)}
+                </div>
               </div>
+
+              {/* Schema check warnings */}
+              {(restorePreview.schemaCheck.versionStatus === "unsupported" ||
+                restorePreview.schemaCheck.versionStatus === "missing") && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                  ⚠️ এই ব্যাকআপ ফাইলটি প্রত্যাশিত স্কিমার সাথে মেলে না। Restore
+                  চালালে কিছু রেকর্ড যুক্ত নাও হতে পারে।
+                </div>
+              )}
+              {restorePreview.schemaCheck.unknownTables.length > 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  অজানা টেবিল উপেক্ষা করা হবে:{" "}
+                  {restorePreview.schemaCheck.unknownTables.join(", ")}
+                </p>
+              )}
+
               <ScrollArea className="h-56 rounded-md border p-3">
                 <ul className="space-y-1 text-sm">
                   {restorePreview.counts.map((c) => (
@@ -1323,6 +1342,36 @@ export function Settings() {
                   করতে হবে।
                 </p>
               )}
+
+              {/* Validation summary */}
+              <div className="rounded-md border p-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span>
+                    🔍 ভ্যালিডেশন:{" "}
+                    {restorePreview.incompleteTotal === 0 ? (
+                      <span className="text-emerald-600 font-medium">
+                        সব রেকর্ড সম্পূর্ণ ✓
+                      </span>
+                    ) : (
+                      <span className="text-amber-600 dark:text-amber-400 font-medium">
+                        {restorePreview.incompleteTotal} টি রেকর্ডে আবশ্যক ফিল্ড অনুপস্থিত
+                      </span>
+                    )}
+                  </span>
+                  {restorePreview.incompleteTotal > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowValidation(true)}
+                    >
+                      বিস্তারিত দেখুন
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  অপূর্ণ রেকর্ডও Restore হবে — পরে আপনি নিজে পূরণ করতে পারবেন।
+                </p>
+              </div>
             </div>
           )}
           <DialogFooter>
