@@ -892,10 +892,11 @@ export function Settings() {
               <input
                 type="file"
                 accept=".json"
-                onChange={handleRestore}
+                onChange={handleRestoreFile}
                 disabled={isRestoring}
                 className="hidden"
                 id="restore-file"
+                ref={restoreInputRef}
               />
               <Button
                 onClick={() => document.getElementById("restore-file")?.click()}
