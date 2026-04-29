@@ -441,6 +441,7 @@ export function Settings() {
       ok: number;
       failed: number;
       error?: string;
+      failedRows?: any[];
     }[] = [];
     try {
       toast.info("Restore শুরু হয়েছে — অপেক্ষা করুন…");
