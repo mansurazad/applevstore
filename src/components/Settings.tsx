@@ -524,6 +524,8 @@ export function Settings() {
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto pb-6 space-y-6">
+        <OfflineBanner message="অফলাইন মোডে আছেন — পরিসংখ্যান ক্যাশ থেকে দেখানো হচ্ছে। ব্যাকআপ, রিস্টোর, রিসেট এবং ব্যাকএন্ড সিঙ্ক অনলাইনে ফিরলে চালু হবে।" />
+
         {/* Cloud sync controls */}
         <SyncSettingsPanel />
 
@@ -693,7 +695,8 @@ export function Settings() {
             </p>
             <Button
               onClick={handleBackup}
-              disabled={isBackingUp}
+              disabled={isBackingUp || !isOnline}
+              title={!isOnline ? "ব্যাকআপের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto"
             >
               {isBackingUp ? "⏳ Creating Backup..." : "📥 Download Backup"}
@@ -716,7 +719,8 @@ export function Settings() {
               />
               <Button
                 onClick={() => document.getElementById("restore-file")?.click()}
-                disabled={isRestoring}
+                disabled={isRestoring || !isOnline}
+                title={!isOnline ? "রিস্টোরের জন্য ইন্টারনেট প্রয়োজন" : undefined}
                 variant="outline"
                 className="w-full md:w-auto"
               >
@@ -749,9 +753,10 @@ export function Settings() {
             </p>
             <Button 
               variant="outline" 
-              disabled={isClearingSales} 
+              disabled={isClearingSales || !isOnline} 
+              title={!isOnline ? "ডেটা পরিবর্তনের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto border-orange-500 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
-              onClick={fetchSalesStats}
+              onClick={() => { if (!isOnline) { toast.error("অফলাইনে এই কাজটি করা যাবে না"); return; } fetchSalesStats(); }}
             >
               {isClearingSales ? "⏳ Clearing..." : "🧹 Clear Sales Data"}
             </Button>
@@ -821,9 +826,10 @@ export function Settings() {
             </p>
             <Button 
               variant="destructive" 
-              disabled={isResetting} 
+              disabled={isResetting || !isOnline} 
+              title={!isOnline ? "ডেটা পরিবর্তনের জন্য ইন্টারনেট প্রয়োজন" : undefined}
               className="w-full md:w-auto"
-              onClick={fetchResetStats}
+              onClick={() => { if (!isOnline) { toast.error("অফলাইনে এই কাজটি করা যাবে না"); return; } fetchResetStats(); }}
             >
               {isResetting ? "⏳ Resetting..." : "🗑️ Reset All Data"}
             </Button>
