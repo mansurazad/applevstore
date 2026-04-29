@@ -19,6 +19,9 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useOfflineQuery, readLocalTable } from "@/hooks/useOfflineQuery";
+import { LocalDB } from "@/lib/localdb/adapter";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { 
   format, 
   startOfDay, 
@@ -96,52 +99,77 @@ export function StaffPerformanceReport() {
 
   const dateRange = getDateRange(period);
 
-  // Fetch activity logs for the period
-  const { data: logs, isLoading: logsLoading } = useQuery({
-    queryKey: ['staff-performance-logs', period],
-    queryFn: async () => {
+  // Fetch activity logs for the period (offline-aware)
+  const { data: logs, isLoading: logsLoading } = useOfflineQuery<any[]>(
+    ['staff-performance-logs', period],
+    async () => {
       const { data, error } = await supabase
         .from('activity_logs')
         .select('*')
         .gte('created_at', dateRange.start.toISOString())
         .lte('created_at', dateRange.end.toISOString())
         .order('created_at', { ascending: false });
-
       if (error) throw error;
-      return data;
+      return data || [];
     },
-    enabled: isAdmin || isManager,
-  });
+    async () => {
+      const all = await LocalDB.listAll<any>('activity_logs');
+      const startMs = dateRange.start.getTime();
+      const endMs = dateRange.end.getTime();
+      return all
+        .filter((l) => {
+          const ts = l.created_at ? new Date(l.created_at).getTime() : 0;
+          return ts >= startMs && ts <= endMs;
+        })
+        .sort((a, b) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        );
+    },
+    undefined,
+    { enabled: isAdmin || isManager }
+  );
 
-  // Fetch sales for the period
-  const { data: sales, isLoading: salesLoading } = useQuery({
-    queryKey: ['staff-performance-sales', period],
-    queryFn: async () => {
+  // Fetch sales for the period (offline-aware)
+  const { data: sales, isLoading: salesLoading } = useOfflineQuery<any[]>(
+    ['staff-performance-sales', period],
+    async () => {
       const { data, error } = await supabase
         .from('sales')
         .select('user_id, total_amount, created_at')
         .gte('created_at', dateRange.start.toISOString())
         .lte('created_at', dateRange.end.toISOString());
-
       if (error) throw error;
-      return data;
+      return data || [];
     },
-    enabled: isAdmin || isManager,
-  });
+    async () => {
+      const all = await LocalDB.listAll<any>('sales');
+      const startMs = dateRange.start.getTime();
+      const endMs = dateRange.end.getTime();
+      return all
+        .filter((s) => {
+          const ts = s.created_at ? new Date(s.created_at).getTime() : 0;
+          return ts >= startMs && ts <= endMs;
+        })
+        .map((s) => ({ user_id: s.user_id, total_amount: s.total_amount, created_at: s.created_at }));
+    },
+    undefined,
+    { enabled: isAdmin || isManager }
+  );
 
-  // Fetch profiles to map user_id to email
-  const { data: profiles } = useQuery({
-    queryKey: ['profiles'],
-    queryFn: async () => {
+  // Fetch profiles to map user_id to email (offline-aware via cache)
+  const { data: profiles } = useOfflineQuery<any[]>(
+    ['profiles'],
+    async () => {
       const { data, error } = await supabase
         .from('profiles')
         .select('id, email, full_name');
-
       if (error) throw error;
-      return data;
+      return data || [];
     },
-    enabled: isAdmin || isManager,
-  });
+    async () => readLocalTable<any>('profiles_cache'),
+    undefined,
+    { enabled: isAdmin || isManager }
+  );
 
   // Calculate staff performance
   const staffPerformance = useMemo(() => {
