@@ -242,3 +242,38 @@ export function forgetOfflineCredential(email?: string) {
 export function listOfflineEmails(): string[] {
   return Object.values(readStore()).map((e) => e.email);
 }
+
+/**
+ * Get the current authenticated user id even when offline.
+ *
+ * Resolution order:
+ *   1. supabase.auth.getSession()  (works offline — reads from local storage)
+ *   2. Most-recent cached offline credential (if exactly one is present, or
+ *      `email` is supplied to disambiguate)
+ *
+ * Returns `null` if nothing usable is found. Mutation paths can use this
+ * instead of `supabase.auth.getUser()` so they keep working with no network.
+ */
+export async function getCurrentUserId(email?: string): Promise<string | null> {
+  // 1. supabase-js stores the session in localStorage; getSession() does
+  //    NOT hit the network, so it works fully offline.
+  try {
+    const { data } = await supabase.auth.getSession();
+    const id = data.session?.user?.id;
+    if (id) return id;
+  } catch {
+    /* fall through to cached credential */
+  }
+
+  // 2. Fall back to a cached offline credential.
+  const store = readStore();
+  const entries = Object.values(store);
+  if (!entries.length) return null;
+  if (email) {
+    const e = store[key(email)];
+    return e?.user_id ?? null;
+  }
+  // Most recently saved credential
+  entries.sort((a, b) => b.saved_at - a.saved_at);
+  return entries[0].user_id;
+}
